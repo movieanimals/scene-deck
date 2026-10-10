@@ -1,0 +1,9 @@
+.build/
+dist/
+.DS_Store
+*.xcuserstate
+
+local/
+
+docs/LIBRARY-DELIVERY.json
+docs/connected-library.png

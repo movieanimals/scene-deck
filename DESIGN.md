@@ -1,0 +1,4 @@
+# Design
+Scene Deck is an evening-use native utility. Its first surface is an album-like library of color compositions, with rooms down the left and brightness at each section. A compact menu repeats only favorites and room levels. System type and controls follow the explicit macOS brief.
+Tokens: canvas #14151A, sidebar #191B22, surface #23252E, ink #F5F2EA, muted #A6A9B5, accent #F4BF78, spacing 8/12/16/24/32, tile radius 14. Scene art is original geometric color composition; no Hue gallery assets.
+Scene names and active labels remain readable without color. Buttons expose accessible labels; the star is a separate action from recall. Window minimum 900×640; content scrolls. Empty search/favorites have helpful text. Demo labeling remains visible; activation changes only mock state.

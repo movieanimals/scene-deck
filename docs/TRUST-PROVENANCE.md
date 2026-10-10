@@ -1,0 +1,13 @@
+# Approved local trust configuration
+
+Derek explicitly approved the pinned OpenHue certificate source and Bridge pairing with Keychain storage on 2026-10-10. This acceptance is of the third-party trust source; it is not a claim of independent verification from Hue's login-gated HTTPS guide.
+
+Source: https://github.com/openhue/openhue-go/blob/main/certs.go (Apache-2.0). Two PEMs are compiled into `HuePinnedRoots.swift`; there is no runtime CA download. Retrieved source SHA-256: `340fe0a13754b69e033b3357444eccd75ba62c909e5a69ba6bc3da87f2ba628a`. Extracted PEM bundle SHA-256: `2ff54626fc51de587cce0f3f0339552f89da781b5d5949fa0c90ec30ddf8acfa`. Original attribution is retained under Tests/Fixtures.
+
+The app evaluates the presented chain with only these anchors, server-auth usage, validity and chain constraints. It disables certificate network fetching. The configured host, port443, exact Bridge-ID CN and serial must match. If a SAN exists, native hostname validation must match that Bridge ID. The accepted legacy policy permits absence of SAN only while still requiring trusted chain and exact CN+serial. Failures cancel the connection; there is no fallback to permissive trust, HTTP, another host, or system-root installation. Redirects are refused, including pairing redirects.
+
+Pairing uses the official documented POST `/api` and `devicetype` body: https://developers.meethue.com/develop/get-started-2/. No entertainment client key is requested. One explicit UI action makes one registration attempt. Physical-button error101 is shown without automatic retries. The response key stays in memory until a successful `SecItemAdd`; no response-body logging exists. The app uses its own generic-password service and per-Bridge account, device-only accessibility, no synchronization. Existing saved access is reused. A Keychain-save failure retains the pending key in memory for an explicit save retry, without creating another registration.
+
+After successful save, the app requests a read-only resource inventory, then observes events/refetches. Scene, brightness, and power writes are disabled both in UI/store and by HueClient's read-only authorization policy. No pairing is automatically attempted at launch. Default launch remains demo; setup is explicit.
+
+The app is locally ad-hoc signed. Rebuilding may cause Keychain to ask again about the changed app; a future distribution build needs stable Developer ID signing. No account/signing changes were made.

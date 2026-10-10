@@ -1,0 +1,12 @@
+{
+  "name": "Scene Deck",
+  "slug": "scene-deck",
+  "description": "A scenes-first Philips Hue controller for Mac.",
+  "category": "Mac app",
+  "icon": "assets/scene-deck.png",
+  "repository": "https://github.com/movieanimals/scene-deck",
+  "repositoryVisibility": "private",
+  "downloadURL": null,
+  "integrationStatus": "Ready for separate homepage editor",
+  "launchBehavior": "Link to a real download when published; do not embed the native app."
+}
