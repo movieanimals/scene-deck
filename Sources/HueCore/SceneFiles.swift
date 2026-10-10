@@ -78,6 +78,13 @@ public struct AvailableLight: Identifiable {
     public let mirekRange: ClosedRange<Int>?
     public let current: SceneLightState
 }
+/// In-memory editing baseline; deliberately not Codable or part of portable scene files.
+public struct SceneEditSnapshot: Equatable {
+    public let sceneID: String
+    public let groupID: String
+    public let document: PortableScene
+    public let mapping: [String: String]
+}
 public struct SceneCatalog {
     public let resources: [HueResource]
     public init(_ resources: [HueResource]) { self.resources = resources }
@@ -117,10 +124,19 @@ public struct SceneCatalog {
         let draft = PortableScene(name: scene.metadata?.name ?? "Scene", groupLabel: group?.metadata?.name ?? "Room", lights: entries)
         try draft.validate(); return (draft, mapping)
     }
-    public func plan(_ scene: PortableScene, groupID: String, mapping: [String: String], replacing sceneID: String? = nil) throws -> SceneWritePlan {
+    public func editSnapshot(sceneID: String) throws -> SceneEditSnapshot {
+        let (document, mapping) = try export(sceneID: sceneID)
+        guard let groupID = resources.first(where: { $0.id == sceneID && $0.type == "scene" })?.group?.rid else { throw HueError.invalidResource }
+        return SceneEditSnapshot(sceneID: sceneID, groupID: groupID, document: document, mapping: mapping)
+    }
+    public func plan(_ scene: PortableScene, groupID: String, mapping: [String: String], replacing sceneID: String? = nil, original: SceneEditSnapshot? = nil) throws -> SceneWritePlan {
         try scene.validate()
         guard let group = groups.first(where: { $0.id == groupID }) else { throw SceneFileError.invalid("Select a room or zone on this Bridge.") }
-        if let sceneID { guard resources.contains(where: { $0.id == sceneID && $0.type == "scene" && $0.group?.rid == groupID }) else { throw SceneFileError.invalid("The scene to edit must belong to the selected room on this Bridge.") } }
+        if let sceneID {
+            guard let original, original.sceneID == sceneID, original.groupID == groupID,
+                  resources.contains(where: { $0.id == sceneID && $0.type == "scene" && $0.group?.rid == groupID }) else { throw SceneFileError.invalid("Reload the scene in its original room before editing.") }
+            guard try editSnapshot(sceneID: sceneID) == original else { throw SceneFileError.invalid("This scene changed on the Bridge. Reload it before applying your edit.") }
+        }
         guard Set(mapping.keys) == Set(scene.lights.map(\.slot)), Set(mapping.values).count == scene.lights.count else { throw SceneFileError.invalid("Map every source light to a different light in the selected room.") }
         let available = lights(in: groupID)
         var actions: [[String: Any]] = []

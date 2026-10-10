@@ -11,12 +11,12 @@ struct SceneEditorView: View {
     @State private var groupID = ""
     @State private var sourceSceneID = ""
     @State private var editingID: String?
-    @State private var original: PortableScene?
+    @State private var original: SceneEditSnapshot?
     @State private var loaded = false
     @State private var message = "Import a Scene Deck JSON file, load a static Bridge scene, or start from your current lights."
     @State private var preview: Preview?
     @State private var applying = false
-    struct Preview: Identifiable { let id = UUID(); let document: PortableScene; let groupID: String; let mapping: [String: String]; let editingID: String?; let bridgeID: String; let original: PortableScene?; let summary: String }
+    struct Preview: Identifiable { let id = UUID(); let document: PortableScene; let groupID: String; let mapping: [String: String]; let editingID: String?; let bridgeID: String; let original: SceneEditSnapshot?; let summary: String }
     var catalog: SceneCatalog { SceneCatalog(store.home.resources) }
     var lights: [AvailableLight] { catalog.lights(in: groupID) }
     var body: some View {
@@ -82,10 +82,10 @@ struct SceneEditorView: View {
         }
     }
     func newDraft() { do { let result = try catalog.draft(groupID: groupID); document = result.0; mapping = result.1; editingID = nil; original = nil; loaded = true; message = "Edit values, review mappings, then preview. Nothing is saved yet." } catch { message = error.localizedDescription } }
-    func loadScene() { do { let result = try catalog.export(sceneID: sourceSceneID); document = result.0; original = result.0; mapping = result.1; editingID = sourceSceneID; loaded = true; message = "Supported static settings loaded. Export stays local; Bridge edits need preview and confirmation." } catch { message = error.localizedDescription } }
+    func loadScene() { do { let result = try catalog.editSnapshot(sceneID: sourceSceneID); document = result.document; original = result; mapping = result.mapping; editingID = sourceSceneID; loaded = true; message = "Supported static settings loaded. Export stays local; Bridge edits need preview and confirmation." } catch { message = error.localizedDescription } }
     func makePreview() {
         do {
-            _ = try catalog.plan(document, groupID: groupID, mapping: mapping, replacing: editingID)
+            _ = try catalog.plan(document, groupID: groupID, mapping: mapping, replacing: editingID, original: original)
             let groupName = store.home.groups.first { $0.id == groupID }?.name ?? "Room"
             var portable = document; portable.groupLabel = groupName
             let rows = document.lights.map { lamp in "• \(lamp.label) → \(lights.first { $0.id == mapping[lamp.slot] }?.name ?? "Unavailable"): \(lamp.state.on ? "on" : "off"), \(lamp.state.brightness.map { "\(Int($0))%" } ?? "brightness unchanged")\(lamp.state.mirek.map { ", \($0) mirek" } ?? "")\(lamp.state.xy.map { ", color x=\($0.x), y=\($0.y)" } ?? "")" }

@@ -17,6 +17,13 @@ struct ConnectionView: View {
             Text("Connect securely and bring in the scenes you already have. Read your library first, then finish setup to enable your scene and brightness controls.").foregroundColor(Theme.muted).lineSpacing(3)
             Button("Find my Bridge") { Task { await connection.discover() } }.disabled(connection.busy || connection.paired || connection.hasPendingSave)
             VStack(alignment: .leading, spacing: 8) {
+                if !connection.savedBridges.isEmpty {
+                    Picker("Saved Bridge", selection: Binding(get: { connection.bridgeID }, set: { connection.selectSavedBridge($0) })) {
+                        Text("Choose saved access").tag("")
+                        ForEach(connection.savedBridges) { Text("\($0.id) · \($0.internalipaddress)").tag($0.id) }
+                    }
+                    Text("Selecting a Bridge does not connect. Choose Reconnect when ready.").font(.caption).foregroundColor(Theme.muted)
+                }
                 if connection.discovered.count > 1 {
                     Picker("Discovered Bridge", selection: Binding(get: { connection.bridgeID }, set: { connection.selectDiscovered($0) })) {
                         Text("Select a Bridge").tag("")
@@ -48,7 +55,11 @@ struct ConnectionView: View {
             }
             if connection.hasSavedEndpoint {
                 Button("Reconnect") { Task { await store.restoreConnection() } }.disabled(connection.busy || connection.hasPendingSave || store.sending)
-                Button("Remove this Mac’s saved access…", role: .destructive) { confirmRemove = true }.disabled(connection.busy || connection.hasPendingSave || store.sending)
+                if connection.paired || store.isLive {
+                    Button("Disconnect / switch Bridge") { store.disconnectForSwitch() }.disabled(connection.busy || connection.hasPendingSave || store.sending)
+                    Text("Disconnecting keeps this Mac’s saved keys and each Bridge’s preferences.").font(.caption).foregroundColor(Theme.muted)
+                }
+                Button("Forget this Mac’s saved access…", role: .destructive) { confirmRemove = true }.disabled(connection.busy || connection.hasPendingSave || store.sending)
             }
             Text("Uses the approved, app-scoped OpenHue certificate roots. The Bridge key stays in your Mac’s Keychain. No account is needed. Optional discovery uses Hue’s discovery service.").font(.system(size: 11)).foregroundColor(Theme.muted).lineSpacing(3)
         }.padding(32).frame(width: 480).background(Theme.canvas).foregroundColor(Theme.ink).preferredColorScheme(.dark).interactiveDismissDisabled(connection.busy || connection.hasPendingSave)

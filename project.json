@@ -9,7 +9,7 @@
   "downloadURL": null,
   "integrationStatus": "Ready for separate homepage editor",
   "launchBehavior": "Link to a real download when published; do not embed the native app.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "features": [
     "Scene library and favorites",
     "Menu bar controls",

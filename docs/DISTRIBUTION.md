@@ -1,4 +1,4 @@
-# Distribution readiness — Scene Deck 0.3
+# Distribution readiness — Scene Deck 0.3.1
 
 The current Apple-silicon/macOS 13+ ZIP is a locally built, ad-hoc-signed preview. It is not a notarized public download. Source remains in the private repository; no public publishing, Apple enrollment, certificate creation, or notarization submission has occurred.
 

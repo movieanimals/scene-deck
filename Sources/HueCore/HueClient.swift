@@ -77,6 +77,7 @@ public final class HueClient {
     private let delegate: SecureSessionDelegate
     // Internal-only seam for deterministic in-memory tests. Production uses the owned HTTPS session.
     private let transport: ((URLRequest) async throws -> (Data, URLResponse))?
+    private let eventTransport: ((@escaping () async -> Void) async throws -> Void)?
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.urlCache = nil; config.httpCookieStorage = nil; config.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -86,8 +87,9 @@ public final class HueClient {
     public convenience init(configuration: BridgeConfiguration, access: BridgeAccess = .blocked, trust: HueTrustConfiguration? = nil) {
         self.init(configuration: configuration, access: access, transport: nil, trust: trust)
     }
-    internal init(configuration: BridgeConfiguration, access: BridgeAccess, transport: ((URLRequest) async throws -> (Data, URLResponse))?, trust: HueTrustConfiguration? = nil) {
+    internal init(configuration: BridgeConfiguration, access: BridgeAccess, transport: ((URLRequest) async throws -> (Data, URLResponse))?, trust: HueTrustConfiguration? = nil, eventTransport: ((@escaping () async -> Void) async throws -> Void)? = nil) {
         factory = HueRequestFactory(configuration: configuration); self.access = access; self.transport = transport
+        self.eventTransport = eventTransport
         delegate = SecureSessionDelegate(trust: trust)
     }
     deinit { /* No session is created merely to tear it down. Owner calls close after use. */ }
@@ -140,6 +142,7 @@ public final class HueClient {
     /// Invalidates a snapshot for each complete event frame. Caller owns coalescing, refetch, backoff and cancellation.
     public func listen(onChange: @escaping () async -> Void) async throws {
         try authorize()
+        if let eventTransport { try await eventTransport(onChange); return }
         let (bytes, response) = try await session.bytes(for: factory.events())
         guard let http = response as? HTTPURLResponse else { throw HueError.malformedResponse }
         guard http.statusCode == 200 else { throw HueError.http(http.statusCode) }

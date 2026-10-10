@@ -15,6 +15,8 @@ Requires Apple silicon and macOS 13 or later. Extract the ZIP, move **Scene Deck
 
 Each Mac pairs separately and stores its own Bridge access key in device-only macOS Keychain. The app package contains no credentials, private Bridge configuration, or scene inventory. A MacBook must pair for itself. Saved connections restore on launch after setup is complete, except when paused after sleep. Sleep closes active sessions and persists a pause across relaunches; wake never reconnects automatically. Choose **Reconnect** when ready. A rebuilt ad-hoc-signed app may require renewed Keychain access.
 
+Use **Disconnect / switch Bridge** in connection setup to select another saved Bridge or pair a new one. Disconnecting retains each Bridge’s key, favorites, and last view, and stays disconnected across relaunch. Selecting a saved Bridge makes no request until you choose **Reconnect**. **Forget this Mac’s saved access** is a separate destructive action.
+
 Demo mode is available before connection; launch with `open "dist/Scene Deck.app" --args --demo` to keep a verification run offline. Favorites are local. Search with **⌘F**, star scenes for the menu bar, click a scene to recall it, and release a brightness slider to commit its room/zone level. Real group power controls are not included in this release.
 
 ## Build and test

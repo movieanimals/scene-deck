@@ -2,6 +2,14 @@ import SwiftUI
 import HueCore
 
 @MainActor final class BridgeConnection: ObservableObject {
+    struct Services {
+        var loadKey: (String) throws -> String? = { try BridgeKeychain.load(bridgeID: $0) }
+        var saveKey: (String, String) throws -> Void = { try BridgeKeychain.save($0, bridgeID: $1) }
+        var removeKey: (String) throws -> Void = { try BridgeKeychain.remove(bridgeID: $0) }
+        var makeClient: (String, String, String, BridgeAccess) -> HueClient = { host, key, bridgeID, access in
+            HueClient(configuration: .init(host: host, applicationKey: key), access: access, trust: .init(host: host, bridgeID: bridgeID))
+        }
+    }
     @Published var host = ""
     @Published var bridgeID = ""
     @Published private(set) var busy = false
@@ -10,6 +18,23 @@ import HueCore
     @Published private(set) var paired = false
     struct DiscoveredBridge: Decodable, Identifiable { let id: String; let internalipaddress: String }
     @Published private(set) var discovered: [DiscoveredBridge] = []
+    @Published private(set) var savedBridges: [DiscoveredBridge] = []
+    var requiresExplicitReconnect: Bool { defaults.bool(forKey: "connectionDisconnected") }
+    func selectSavedBridge(_ id: String) {
+        guard !busy, !paired, pendingKey == nil, let saved = savedBridges.first(where: { $0.id == id }) else { return }
+        bridgeID = saved.id; host = saved.internalipaddress; verified = false; verifiedEndpoint = nil
+        defaults.set(true, forKey: "connectionDisconnected")
+        rememberEndpoint()
+        message = "Saved Bridge selected. Choose Reconnect to use this Mac’s saved access."
+    }
+    /// Keeps all per-Bridge keys and preferences. Selecting the next endpoint makes no request.
+    func disconnectForSwitch() -> Bool {
+        guard !busy, pendingKey == nil else { return false }
+        pauseForSleep(); paired = false; verifiedEndpoint = nil; discovered = []
+        defaults.set(true, forKey: "connectionDisconnected")
+        message = "Disconnected. Choose a saved Bridge, find another, or enter its details. Saved access and preferences are kept."
+        return true
+    }
     func selectDiscovered(_ id: String) {
         guard !busy, !paired, let bridge = discovered.first(where: { $0.id == id }) else { return }
         bridgeID = bridge.id.lowercased(); host = bridge.internalipaddress; verified = false
@@ -21,8 +46,10 @@ import HueCore
         records[bridgeID] = host
         defaults.set(records, forKey: "bridgeEndpoints")
         defaults.set(host, forKey: "bridgeHost"); defaults.set(bridgeID, forKey: "bridgeID")
+        savedBridges = records.map { DiscoveredBridge(id: $0.key, internalipaddress: $0.value) }.sorted { $0.id < $1.id }
     }
     private let defaults: UserDefaults
+    private let services: Services
     private var suspendedForSleep = false
     private var pendingRead: HueReadConnection?
     private var pendingService: HuePairingService?
@@ -36,17 +63,20 @@ import HueCore
     }
     private var pendingKey: String?
     private var verifiedEndpoint: String?
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
+    init(defaults: UserDefaults = .standard, services: Services = Services()) {
+        self.defaults = defaults; self.services = services
         let args = CommandLine.arguments
         func value(_ name: String) -> String { guard let index = args.firstIndex(of: name), args.count > index + 1 else { return "" }; return args[index + 1] }
         host = value("--bridge-host"); bridgeID = value("--bridge-id")
         if host.isEmpty { host = defaults.string(forKey: "bridgeHost") ?? "" }
         if bridgeID.isEmpty { bridgeID = defaults.string(forKey: "bridgeID") ?? "" }
+        var records = defaults.dictionary(forKey: "bridgeEndpoints") as? [String: String] ?? [:]
+        if !bridgeID.isEmpty, !host.isEmpty { records[bridgeID] = host }
+        savedBridges = records.map { DiscoveredBridge(id: $0.key, internalipaddress: $0.value) }.sorted { $0.id < $1.id }
     }
     func removeLocalAccess() throws {
         guard !busy, pendingKey == nil else { throw HueError.approvalRequired }
-        try BridgeKeychain.remove(bridgeID: bridgeID)
+        try services.removeKey(bridgeID)
         defaults.set(false, forKey: "setupComplete-" + bridgeID)
         paired = false; verified = false
         message = "Local access removed. Verify and pair again with the physical Bridge button."
@@ -54,9 +84,9 @@ import HueCore
     var hasSavedEndpoint: Bool { !host.isEmpty && !bridgeID.isEmpty }
     var setupCompleted: Bool { defaults.bool(forKey: "setupComplete-" + bridgeID) }
     func completeSetup() throws -> HueClient {
-        guard paired, let key = try BridgeKeychain.load(bridgeID: bridgeID) else { throw HueError.approvalRequired }
+        guard paired, let key = try services.loadKey(bridgeID) else { throw HueError.approvalRequired }
         defaults.set(true, forKey: "setupComplete-" + bridgeID)
-        return HueClient(configuration: .init(host: host, applicationKey: key), access: .control, trust: .init(host: host, bridgeID: bridgeID))
+        return services.makeClient(host, key, bridgeID, .control)
     }
     /// Restore never registers a new application if this Mac has no key.
     func restore() async -> (HomeSnapshot, HueClient)? {
@@ -64,9 +94,9 @@ import HueCore
         suspendedForSleep = false
         busy = true; defer { busy = false }
         do {
-            guard let key = try BridgeKeychain.load(bridgeID: bridgeID) else { message = "This Mac needs its own pairing. Verify the Bridge, then press its button."; return nil }
+            guard let key = try services.loadKey(bridgeID) else { message = "This Mac needs its own pairing. Verify the Bridge, then press its button."; return nil }
             guard !suspendedForSleep else { throw CancellationError() }
-            let client = HueClient(configuration: .init(host: host, applicationKey: key), access: .readOnly, trust: .init(host: host, bridgeID: bridgeID))
+            let client = services.makeClient(host, key, bridgeID, .readOnly)
             let recovery = HueReadConnection(client: client, bridgeID: bridgeID, host: host, addressChanged: { _ in })
             pendingRead = recovery
             defer { pendingRead = nil }
@@ -76,6 +106,7 @@ import HueCore
                 let resolved = await recovery.currentEndpoint()
                 host = resolved.host
                 paired = true; verified = true; verifiedEndpoint = endpoint
+                defaults.set(false, forKey: "connectionDisconnected")
                 rememberEndpoint()
                 message = "Connected. \(snapshot.scenes.count) scenes. Access is stored on this Mac."
                 return (snapshot, resolved.client)
@@ -111,7 +142,7 @@ import HueCore
         guard !busy, let key = pendingKey else { return }
         busy = true; defer { busy = false }
         do {
-            try BridgeKeychain.save(key, bridgeID: bridgeID)
+            try services.saveKey(key, bridgeID)
             pendingKey = nil; rememberEndpoint()
             message = "Access saved on this Mac. Choose Reconnect explicitly to load your scenes."
         } catch { message = "Keychain could not save access. Keep this window open and retry saving." }
@@ -137,7 +168,7 @@ import HueCore
         let trust = HueTrustConfiguration(host: host, bridgeID: bridgeID)
         do {
             // Explicit user action only. Reuse our own saved key to avoid duplicate registrations.
-            let saved = try BridgeKeychain.load(bridgeID: bridgeID)
+            let saved = try services.loadKey(bridgeID)
             let key: String
             if let saved { key = saved }
             else {
@@ -148,17 +179,18 @@ import HueCore
                     pendingKey = try await service.pair()
                 }
                 guard let pendingKey else { throw PairingError.invalidResponse }
-                try BridgeKeychain.save(pendingKey, bridgeID: bridgeID)
+                try services.saveKey(pendingKey, bridgeID)
                 key = pendingKey; self.pendingKey = nil
             }
             guard !suspendedForSleep else { throw CancellationError() }
-            let client = HueClient(configuration: .init(host: host, applicationKey: key), access: .readOnly, trust: trust)
+            let client = services.makeClient(host, key, bridgeID, .readOnly)
             pendingInventory = client; defer { pendingInventory = nil }
             do {
                 let resources = try await client.resources()
                 let snapshot = HomeSnapshot.project(resources)
                 guard !suspendedForSleep else { client.close(); throw CancellationError() }
                 paired = true
+                defaults.set(false, forKey: "connectionDisconnected")
                 rememberEndpoint()
                 message = "Connected. \(snapshot.scenes.count) scenes across \(snapshot.groups.count) rooms and zones. Access saved in Keychain."
                 return (snapshot, client)

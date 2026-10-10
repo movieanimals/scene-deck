@@ -1,10 +1,10 @@
 # Portable scene files
 
-Scene Deck 0.3 imports and exports **Scene Deck JSON version 1**. This is a small static-light format, not an importer for arbitrary Hue-app backups or gallery downloads. Files stay on your Mac. Importing a file never calls a Bridge.
+Scene Deck 0.3.1 imports and exports **Scene Deck JSON version 1**. This is a small static-light format, not an importer for arbitrary Hue-app backups or gallery downloads. Files stay on your Mac. Importing a file never calls a Bridge.
 
 Open **Scene files & editor**. Choose a room/zone, then import a file, load an existing static scene, or start from current lights. Demo mode also supports preparation and export. To save on a real Bridge, finish setup, map every source lamp to a different light in the selected room, and review **Preview changes**. The final **Create scene on Bridge** or **Apply changes to scene** button is the only write step. It saves the definition without issuing a recall command.
 
-The app re-reads the selected Bridge before writing, validates room membership and each light's capabilities again, and refuses an edit if the original supported settings changed since loading. Changes made by another controller after that final read remain a possible race; the Hue endpoint does not provide a transaction here. Failed/uncertain writes are never retried automatically. Refresh the library and check for the scene before trying again.
+The app re-reads the selected Bridge before writing, validates room membership and each light's capabilities again, and refuses an edit if the original supported settings, scene/group identity, or light target mapping changed since loading. The immutable editing baseline retains target IDs only in memory, separately from the portable export; retargeting to another same-named light therefore also blocks a stale edit. Changes made by another controller after that final read remain a possible race; the Hue endpoint does not provide a transaction here. Failed/uncertain writes are never retried automatically. Refresh the library and check for the scene before trying again.
 
 ## Version 1 rules
 

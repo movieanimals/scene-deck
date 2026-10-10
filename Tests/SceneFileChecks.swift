@@ -42,7 +42,7 @@ import Foundation
         let request = try factory.sceneWrite(remapped)
         let body = String(data: request.httpBody!, encoding: .utf8)!
         check(request.httpMethod == "POST" && body.contains("b-light") && !body.contains("a-light") && !body.contains("recall"), "Import creates only in mapped household and never recalls")
-        let edit = try a.plan(scene, groupID: "a-room", mapping: mapping, replacing: "a-scene")
+        let edit = try a.plan(scene, groupID: "a-room", mapping: mapping, replacing: "a-scene", original: a.editSnapshot(sceneID: "a-scene"))
         check(try factory.sceneWrite(edit).httpMethod == "PUT", "Editing uses selected scene endpoint")
         rejects("Cannot edit another household scene") { _ = try b.plan(scene, groupID: "b-room", mapping: ["lamp-1":"b-light"], replacing: "a-scene") }
         var attempts = 0
@@ -58,6 +58,28 @@ import Foundation
         rejects("Export never invents an omitted scene power state") { _ = try simple.export(sceneID: "scene") }
         let demo = SceneCatalog(DemoHome.make().resources)
         check(try demo.draft(groupID: "living").0.lights.count == 2 && demo.export(sceneID: "living-0").0.name == "Golden hour", "Offline demo provides editor and export fixtures")
+        func sameNamedLights(target: String) throws -> SceneCatalog {
+            let json = """
+            {"errors":[],"data":[
+              {"id":"same-room","type":"room","metadata":{"name":"Study"},"children":[{"rid":"first-light","rtype":"light"},{"rid":"second-light","rtype":"light"}]},
+              {"id":"first-light","type":"light","metadata":{"name":"Desk"},"on":{"on":true},"dimming":{"brightness":50}},
+              {"id":"second-light","type":"light","metadata":{"name":"Desk"},"on":{"on":true},"dimming":{"brightness":50}},
+              {"id":"same-scene","type":"scene","metadata":{"name":"Work"},"group":{"rid":"same-room","rtype":"room"},"actions":[{"target":{"rid":"\(target)","rtype":"light"},"action":{"on":{"on":true},"dimming":{"brightness":50}}}]}
+            ]}
+            """
+            return SceneCatalog(try HueClient.decode(Data(json.utf8), status: 200).data)
+        }
+        let initial = try sameNamedLights(target: "first-light"), changed = try sameNamedLights(target: "second-light")
+        let baseline = try initial.editSnapshot(sceneID: "same-scene")
+        check(try changed.export(sceneID: "same-scene").0 == baseline.document, "Same-named retargeting is invisible in portable scene values")
+        rejects("Concurrent same-named target change blocks stale edit") {
+            _ = try changed.plan(baseline.document, groupID: "same-room", mapping: baseline.mapping, replacing: "same-scene", original: baseline)
+        }
+        check(try initial.plan(baseline.document, groupID: "same-room", mapping: baseline.mapping, replacing: "same-scene", original: baseline).sceneID == "same-scene", "Unchanged scene baseline permits editing")
+        check(try initial.plan(baseline.document, groupID: "same-room", mapping: ["lamp-1":"second-light"], replacing: "same-scene", original: baseline).sceneID == "same-scene", "Explicit draft remapping remains separate from original target baseline")
+        rejects("Editing without an original target baseline fails closed") { _ = try initial.plan(baseline.document, groupID: "same-room", mapping: baseline.mapping, replacing: "same-scene") }
+        let portableText = String(data: try baseline.document.encoded(), encoding: .utf8)!
+        check(!portableText.contains("first-light") && !portableText.contains("second-light") && !portableText.contains("same-scene") && !portableText.contains("same-room"), "Edit baseline identifiers never enter portable export")
         print("\(count) portable scene checks passed. Synthetic households; no network or Bridge writes.")
     }
 }

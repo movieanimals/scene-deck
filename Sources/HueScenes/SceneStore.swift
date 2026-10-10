@@ -30,10 +30,10 @@ import Combine
     private var synchronizer: BridgeSynchronizer?
     private var subscriptions: Set<AnyCancellable> = []
     private let defaults: UserDefaults
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, connectionServices: BridgeConnection.Services = .init()) {
         self.defaults = defaults
-        connection = BridgeConnection(defaults: defaults)
-        showConnection = CommandLine.arguments.contains("--setup") || (!connection.hasSavedEndpoint && !CommandLine.arguments.contains("--demo"))
+        connection = BridgeConnection(defaults: defaults, services: connectionServices)
+        showConnection = CommandLine.arguments.contains("--setup") || ((!connection.hasSavedEndpoint || connection.requiresExplicitReconnect) && !CommandLine.arguments.contains("--demo"))
         pausedAfterSleep = !CommandLine.arguments.contains("--demo") && defaults.bool(forKey: "pausedAfterSleep-" + connection.bridgeID)
         favorites = Set(defaults.stringArray(forKey: "demoFavoriteIDs") ?? ["living-0", "living-2", "bedroom-1", "studio-4"])
         sleepSubscription = NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification).sink { [weak self] _ in Task { @MainActor in self?.pauseForSleep() } }
@@ -53,7 +53,7 @@ import Combine
                 }
             }
         }
-        else if !CommandLine.arguments.contains("--demo") && connection.hasSavedEndpoint && !pausedAfterSleep && (connection.setupCompleted || CommandLine.arguments.contains("--connect-saved")) {
+        else if !CommandLine.arguments.contains("--demo") && connection.hasSavedEndpoint && !connection.requiresExplicitReconnect && !pausedAfterSleep && (connection.setupCompleted || CommandLine.arguments.contains("--connect-saved")) {
             Task { [weak self] in await self?.restoreConnection() }
         }
     }
@@ -188,14 +188,13 @@ import Combine
         sync.start()
         NotificationCenter.default.post(name: Notification.Name("SceneDeckInventoryReady"), object: nil)
     }
-    func saveSceneFile(_ document: PortableScene, groupID: String, mapping: [String: String], replacing sceneID: String?, expectedBridgeID: String, original: PortableScene?, confirmed: Bool) async throws {
+    func saveSceneFile(_ document: PortableScene, groupID: String, mapping: [String: String], replacing sceneID: String?, expectedBridgeID: String, original: SceneEditSnapshot?, confirmed: Bool) async throws {
         guard confirmed, controlsEnabled, !pausedAfterSleep, !sending, expectedBridgeID == activeBridgeID, let client = controlClient else { throw HueError.approvalRequired }
         let generation = sessionGeneration
         sending = true; defer { if generation == sessionGeneration { sending = false } }
         let fresh = SceneCatalog(try await client.resources())
         guard !Task.isCancelled, generation == sessionGeneration, !pausedAfterSleep else { throw HueError.approvalRequired }
-        if let sceneID, let original, try fresh.export(sceneID: sceneID).0 != original { throw SceneFileError.invalid("This scene changed on the Bridge. Reload it before applying your edit.") }
-        let plan = try fresh.plan(document, groupID: groupID, mapping: mapping, replacing: sceneID)
+        let plan = try fresh.plan(document, groupID: groupID, mapping: mapping, replacing: sceneID, original: original)
         do { _ = try await client.saveScene(plan) }
         catch {
             if generation != sessionGeneration || pausedAfterSleep { throw SceneFileError.invalid("Save interrupted. After reconnecting, check whether the Bridge already saved this scene before trying again.") }
@@ -214,6 +213,17 @@ import Combine
             home = DemoHome.make(); favorites = Set(defaults.stringArray(forKey: "demoFavoriteIDs") ?? [])
             notice = connection.message; showConnection = true
         } catch { notice = "Could not remove local access. Nothing was changed on the Bridge." }
+    }
+    func disconnectForSwitch() {
+        guard !sending, connection.disconnectForSwitch() else { return }
+        sessionGeneration += 1; commandTask?.cancel(); commandTask = nil
+        subscriptions.removeAll(); synchronizer?.stop(); synchronizer = nil
+        controlClient?.close(); controlClient = nil; readClient?.close(); readClient = nil
+        liveRecall = nil; liveBrightness = nil; liveFetch = nil; controlsEnabled = false
+        isLive = false; activeBridgeID = ""; pausedAfterSleep = false
+        home = DemoHome.make(); selection = "all"; search = ""; simulatedOffline = false
+        favorites = Set(defaults.stringArray(forKey: "demoFavoriteIDs") ?? [])
+        showSceneEditor = false; showConnection = true; notice = connection.message
     }
     func reset() { guard !isLive else { return }; home = DemoHome.make(); simulatedOffline = false; notice = "Demo home reset. Favorites kept." }
 }
