@@ -3,6 +3,7 @@ import HueCore
 
 struct LibraryView: View {
     @EnvironmentObject var store: SceneStore
+    @Environment(\.openWindow) private var openWindow
     @FocusState private var searchFocused: Bool
     var body: some View {
         HStack(spacing: 0) {
@@ -10,6 +11,7 @@ struct LibraryView: View {
             VStack(spacing: 0) {
                 header
                 Divider().overlay(Theme.surface)
+                if store.pausedAfterSleep { HStack { Label("Paused after sleep", systemImage: "pause.circle"); Spacer(); Button("Reconnect") { Task { await store.restoreConnection() } } }.padding().background(Theme.surface) }
                 if store.simulatedOffline { Label("Demo Bridge offline. Restore the connection to use controls.", systemImage: "wifi.slash").foregroundColor(Theme.accent).font(.callout).padding().frame(maxWidth: .infinity, alignment: .leading).background(Theme.surface) }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 32) {
@@ -35,6 +37,8 @@ struct LibraryView: View {
             .frame(minWidth: 900, minHeight: 640)
             .preferredColorScheme(.dark)
             .sheet(isPresented: $store.showConnection) { ConnectionView(connection: store.connection) }
+            .sheet(isPresented: $store.showSceneEditor) { SceneEditorView() }
+            .onAppear { AppDelegate.openLibrary = { openWindow(id: "library") } }
             .background(Button("") { searchFocused = true }.keyboardShortcut("f", modifiers: .command).hidden())
     }
     private var sidebar: some View {
@@ -78,11 +82,13 @@ struct LibraryView: View {
                     Text("A different atmosphere, one click away.").font(.system(size: 13)).foregroundColor(Theme.muted)
                 }
                 Spacer()
+                Button("Scene files & editor…") { store.showSceneEditor = true }.disabled(store.home.resources.isEmpty || store.pausedAfterSleep)
                 Menu {
                     Button("Simulate a Bridge event") { store.simulateExternalChange() }
                     Button(store.simulatedOffline ? "Restore demo connection" : "Simulate offline Bridge") { store.simulatedOffline.toggle() }
                     Button("Reset demo rooms") { store.reset() }
                     Divider()
+                    Button("Reconnect") { Task { await store.restoreConnection() } }
                     Button("Connection setup…") { store.showConnection = true }
                 } label: { Label(store.isLive ? "Bridge connected" : "Demo mode", systemImage: "circle.dotted").font(.system(size: 12)) }
                     .menuStyle(.borderlessButton).fixedSize().foregroundColor(Theme.accent).padding(.top, 9)

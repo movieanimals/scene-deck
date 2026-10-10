@@ -4,11 +4,18 @@ import Combine
 
 @MainActor final class SceneStore: ObservableObject {
     @Published var home = DemoHome.make()
-    @Published var selection = "all"
+    @Published var selection = "all" { didSet { if isLive && !activeBridgeID.isEmpty { defaults.set(selection, forKey: "selectedView-" + activeBridgeID) } } }
     @Published var search = ""
     @Published var favorites: Set<String>
     @Published var notice = "Demo home ready. Choose a scene to try it."
     @Published var showConnection = false
+    @Published var showSceneEditor = false
+    @Published private(set) var activeBridgeID = ""
+    @Published private(set) var pausedAfterSleep = false
+    private var sleepSubscription: AnyCancellable?
+    private var readClient: HueClient?
+    private var sessionGeneration = 0
+    private var favoriteKey: String { "bridgeFavoriteIDs-" + activeBridgeID }
     @Published var simulatedOffline = false
     let connection: BridgeConnection
     @Published private(set) var controlsEnabled = false
@@ -18,7 +25,7 @@ import Combine
     private var liveBrightness: ((String, Double) async throws -> Void)?
     private var liveFetch: (() async throws -> [HueResource])?
     private var commandTask: Task<Void, Never>?
-    var controlsDisabled: Bool { simulatedOffline || sending || (isLive && !controlsEnabled) }
+    var controlsDisabled: Bool { simulatedOffline || sending || pausedAfterSleep || (isLive && !controlsEnabled) }
     @Published private(set) var isLive = false
     private var synchronizer: BridgeSynchronizer?
     private var subscriptions: Set<AnyCancellable> = []
@@ -26,8 +33,10 @@ import Combine
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         connection = BridgeConnection(defaults: defaults)
-        showConnection = CommandLine.arguments.contains("--setup")
+        showConnection = CommandLine.arguments.contains("--setup") || (!connection.hasSavedEndpoint && !CommandLine.arguments.contains("--demo"))
+        pausedAfterSleep = !CommandLine.arguments.contains("--demo") && defaults.bool(forKey: "pausedAfterSleep-" + connection.bridgeID)
         favorites = Set(defaults.stringArray(forKey: "demoFavoriteIDs") ?? ["living-0", "living-2", "bedroom-1", "studio-4"])
+        sleepSubscription = NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification).sink { [weak self] _ in Task { @MainActor in self?.pauseForSleep() } }
         // Explicit command-line equivalent of the approved Verify + Pair buttons.
         // Never used by normal launch; reports only non-secret outcome text.
         if CommandLine.arguments.contains("--pair-after-button") {
@@ -44,17 +53,32 @@ import Combine
                 }
             }
         }
-        else if connection.hasSavedEndpoint && (connection.setupCompleted || CommandLine.arguments.contains("--connect-saved")) {
+        else if !CommandLine.arguments.contains("--demo") && connection.hasSavedEndpoint && !pausedAfterSleep && (connection.setupCompleted || CommandLine.arguments.contains("--connect-saved")) {
             Task { [weak self] in await self?.restoreConnection() }
         }
     }
+    func pauseForSleep() {
+        guard isLive || !CommandLine.arguments.contains("--demo") else { return }
+        guard isLive || connection.hasSavedEndpoint else { return }
+        sessionGeneration += 1; pausedAfterSleep = true
+        defaults.set(true, forKey: "pausedAfterSleep-" + connection.bridgeID)
+        commandTask?.cancel(); sending = false; synchronizer?.pauseForSleep(); connection.pauseForSleep()
+        // Invalidate the session too: editor POST/PUT work must never resume after wake.
+        controlClient?.close(); controlClient = nil; readClient?.close(); readClient = nil
+        liveRecall = nil; liveBrightness = nil; liveFetch = nil; controlsEnabled = false
+        notice = "Paused after sleep · Choose Reconnect when ready"
+    }
     func restoreConnection() async {
+        let generation = sessionGeneration
         if let (snapshot, client) = await connection.restore() {
+            guard generation == sessionGeneration else { client.close(); return }
+            pausedAfterSleep = false
             connect(snapshot: snapshot, client: client)
             if connection.setupCompleted { finishSetup() }
         } else { notice = connection.message; showConnection = true }
     }
     func finishSetup() {
+        guard !pausedAfterSleep else { notice = "Reconnect explicitly before enabling controls."; return }
         do {
             let client = try connection.completeSetup()
             controlClient = client
@@ -69,18 +93,20 @@ import Combine
         controlsEnabled = true; notice = "Ready · Choose a scene to change your lights"
     }
     private func sendCommand(_ label: String, operation: @escaping () async throws -> Void) {
-        guard controlsEnabled, !sending else { return }
+        guard controlsEnabled, !sending, !pausedAfterSleep else { return }
+        let generation = sessionGeneration
         sending = true; notice = "Sending \(label)…"
         commandTask = Task { [weak self] in
-            defer { self?.sending = false }
+            defer { if self?.sessionGeneration == generation { self?.sending = false } }
             do {
                 try await operation()
+                guard !Task.isCancelled, self?.sessionGeneration == generation, self?.pausedAfterSleep == false else { return }
                 do {
                     if let fetch = self?.liveFetch { self?.home = HomeSnapshot.project(try await fetch()) }
                     else { self?.synchronizer?.start() }
                     self?.notice = "\(label) · Bridge confirmed"
                 } catch { self?.notice = "Command sent. State refresh failed; waiting for the Bridge." }
-            } catch { self?.notice = "The Bridge did not confirm the command. Check the connection and try again." }
+            } catch { if self?.sessionGeneration == generation { self?.notice = "The Bridge did not confirm the command. Check the connection and try again." } }
         }
     }
     var title: String { selection == "favorites" ? "Your favorites" : home.groups.first { $0.id == selection }?.name ?? "Your scenes" }
@@ -102,7 +128,7 @@ import Combine
     }
     func favorite(_ scene: LightScene) {
         if favorites.contains(scene.id) { favorites.remove(scene.id) } else { favorites.insert(scene.id) }
-        defaults.set(favorites.sorted(), forKey: isLive ? "bridgeFavoriteIDs" : "demoFavoriteIDs")
+        defaults.set(favorites.sorted(), forKey: isLive ? favoriteKey : "demoFavoriteIDs")
     }
     func brightness(_ group: SceneGroup, _ value: Double) {
         if isLive {
@@ -126,16 +152,68 @@ import Combine
         notice = "Simulated Bridge event · Living room updated to Blue hour"
     }
     func connect(snapshot: HomeSnapshot, client: HueClient) {
+        guard !pausedAfterSleep else { client.close(); return }
+        sessionGeneration += 1; commandTask?.cancel(); sending = false
         subscriptions.removeAll(); synchronizer?.stop(); controlsEnabled = false
-        isLive = true; simulatedOffline = false; home = snapshot; selection = "all"; search = ""
-        favorites = Set(defaults.stringArray(forKey: "bridgeFavoriteIDs") ?? [])
+        controlClient?.close(); controlClient = nil; liveRecall = nil; liveBrightness = nil; liveFetch = nil
+        readClient = client; activeBridgeID = connection.bridgeID
+        let savedSelection = defaults.string(forKey: "selectedView-" + activeBridgeID) ?? "all"
+        pausedAfterSleep = false; defaults.set(false, forKey: "pausedAfterSleep-" + activeBridgeID)
+        isLive = true; simulatedOffline = false; home = snapshot; selection = (["all", "favorites"].contains(savedSelection) || snapshot.groups.contains { $0.id == savedSelection }) ? savedSelection : "all"; search = ""
+        if defaults.object(forKey: favoriteKey) == nil, defaults.string(forKey: "bridgeID") == activeBridgeID, let legacy = defaults.stringArray(forKey: "bridgeFavoriteIDs") {
+            defaults.set(legacy, forKey: favoriteKey); defaults.removeObject(forKey: "bridgeFavoriteIDs")
+        }
+        favorites = Set(defaults.stringArray(forKey: favoriteKey) ?? [])
         notice = "Bridge connected · Read-only scene inventory · No lights changed"
-        let sync = BridgeSynchronizer(client: client)
+        let generation = sessionGeneration
+        let sync = BridgeSynchronizer(client: client, bridgeID: activeBridgeID, host: connection.host, addressChanged: { [weak self] address in
+            Task { @MainActor in
+                guard let self, self.sessionGeneration == generation, !self.pausedAfterSleep else { return }
+                self.connection.updateVerifiedAddress(address)
+                // Recreate control client at the verified address; do not issue any lighting request.
+                if self.controlsEnabled, let old = self.controlClient {
+                    let moved = old.relocatedCopy(host: address, bridgeID: self.activeBridgeID)
+                    self.controlClient = moved; old.close()
+                    self.enableControls(recall: { try await moved.recall($0) }, brightness: { try await moved.brightness($0, value: $1) }, fetch: nil)
+                }
+            }
+        })
         synchronizer = sync
         sync.$snapshot.compactMap { $0 }.sink { [weak self] in self?.home = $0 }.store(in: &subscriptions)
         sync.$status.sink { [weak self] in self?.notice = "Bridge · \($0)" }.store(in: &subscriptions)
+        sync.$authorizationRequired.filter { $0 }.sink { [weak self] _ in
+            self?.commandTask?.cancel(); self?.controlClient?.close(); self?.controlClient = nil
+            self?.liveRecall = nil; self?.liveBrightness = nil; self?.controlsEnabled = false
+        }.store(in: &subscriptions)
         sync.start()
         NotificationCenter.default.post(name: Notification.Name("SceneDeckInventoryReady"), object: nil)
+    }
+    func saveSceneFile(_ document: PortableScene, groupID: String, mapping: [String: String], replacing sceneID: String?, expectedBridgeID: String, original: PortableScene?, confirmed: Bool) async throws {
+        guard confirmed, controlsEnabled, !pausedAfterSleep, !sending, expectedBridgeID == activeBridgeID, let client = controlClient else { throw HueError.approvalRequired }
+        let generation = sessionGeneration
+        sending = true; defer { if generation == sessionGeneration { sending = false } }
+        let fresh = SceneCatalog(try await client.resources())
+        guard !Task.isCancelled, generation == sessionGeneration, !pausedAfterSleep else { throw HueError.approvalRequired }
+        if let sceneID, let original, try fresh.export(sceneID: sceneID).0 != original { throw SceneFileError.invalid("This scene changed on the Bridge. Reload it before applying your edit.") }
+        let plan = try fresh.plan(document, groupID: groupID, mapping: mapping, replacing: sceneID)
+        do { _ = try await client.saveScene(plan) }
+        catch {
+            if generation != sessionGeneration || pausedAfterSleep { throw SceneFileError.invalid("Save interrupted. After reconnecting, check whether the Bridge already saved this scene before trying again.") }
+            throw error
+        }
+        guard generation == sessionGeneration, !pausedAfterSleep else { throw SceneFileError.invalid("Save interrupted. Reconnect and check the scene before trying again.") }
+        synchronizer?.start(); notice = "Scene saved · Library refreshing"
+    }
+    func removeLocalAccess() {
+        guard !sending else { return }
+        do {
+            try connection.removeLocalAccess()
+            sessionGeneration += 1; commandTask?.cancel(); synchronizer?.stop(); synchronizer = nil; subscriptions.removeAll()
+            controlClient?.close(); controlClient = nil; readClient?.close(); readClient = nil
+            liveRecall = nil; liveBrightness = nil; controlsEnabled = false; isLive = false
+            home = DemoHome.make(); favorites = Set(defaults.stringArray(forKey: "demoFavoriteIDs") ?? [])
+            notice = connection.message; showConnection = true
+        } catch { notice = "Could not remove local access. Nothing was changed on the Bridge." }
     }
     func reset() { guard !isLive else { return }; home = DemoHome.make(); simulatedOffline = false; notice = "Demo home reset. Favorites kept." }
 }

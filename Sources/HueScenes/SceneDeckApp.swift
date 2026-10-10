@@ -22,6 +22,24 @@ import AppKit
     }
 }
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    static var openLibrary: (() -> Void)?
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard !CommandLine.arguments.contains("--snapshot"), let bundleID = Bundle.main.bundleIdentifier else { return }
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+        for other in others {
+            if CommandLine.arguments.contains("--replace-running") {
+                other.terminate() // Replace only this app's older copy when installing an update.
+            } else {
+                other.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+                NSApp.terminate(nil); return
+            }
+        }
+    }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        Self.openLibrary?()
+        NSApp.activate(ignoringOtherApps: true)
+        return false
+    }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)

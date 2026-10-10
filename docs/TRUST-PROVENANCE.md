@@ -1,6 +1,6 @@
-# Approved local trust configuration
+# Scoped Bridge trust configuration
 
-Derek explicitly approved the pinned OpenHue certificate source and Bridge pairing with Keychain storage on 2026-10-10. This acceptance is of the third-party trust source; it is not a claim of independent verification from Hue's login-gated HTTPS guide.
+Scene Deck uses the pinned OpenHue certificate source described below. This documents a third-party trust source; it is not a claim of independent verification from Hue's login-gated HTTPS guide.
 
 Source: https://github.com/openhue/openhue-go/blob/main/certs.go (Apache-2.0). Two PEMs are compiled into `HuePinnedRoots.swift`; there is no runtime CA download. Retrieved source SHA-256: `340fe0a13754b69e033b3357444eccd75ba62c909e5a69ba6bc3da87f2ba628a`. Extracted PEM bundle SHA-256: `2ff54626fc51de587cce0f3f0339552f89da781b5d5949fa0c90ec30ddf8acfa`. Original attribution is retained under Tests/Fixtures.
 
@@ -8,6 +8,6 @@ The app evaluates the presented chain with only these anchors, server-auth usage
 
 Pairing uses the official documented POST `/api` and `devicetype` body: https://developers.meethue.com/develop/get-started-2/. No entertainment client key is requested. One explicit UI action makes one registration attempt. Physical-button error101 is shown without automatic retries. The response key stays in memory until a successful `SecItemAdd`; no response-body logging exists. The app uses its own generic-password service and per-Bridge account, device-only accessibility, no synchronization. Existing saved access is reused. A Keychain-save failure retains the pending key in memory for an explicit save retry, without creating another registration.
 
-After successful save, the app requests a read-only resource inventory, then observes events/refetches. Scene and brightness writes remain disabled during setup. Explicit Finish setup enables user-initiated scene/brightness requests through a control client; finishing or restoring setup issues no light command. Real group power remains unavailable. No pairing is automatically attempted at launch. Default launch remains demo; setup is explicit.
+After successful save, the app requests a read-only resource inventory, then observes events/refetches. Scene and brightness writes remain disabled during setup. Explicit Finish setup enables user-initiated controls; finishing or restoring setup issues no light command. Scene-definition writes have a separate preview and confirmation. Real group power remains unavailable. No pairing is automatically attempted at launch. A fresh installation opens setup with an offline demo; a previously completed connection may restore on launch unless paused after sleep. Wake never reconnects automatically. Pending Keychain-save recovery after sleep is local only and requires a separate explicit reconnect.
 
 The app is locally ad-hoc signed. Rebuilding may cause Keychain to ask again about the changed app; a future distribution build needs stable Developer ID signing. No account/signing changes were made.

@@ -19,9 +19,13 @@ public enum PairingError: Error, LocalizedError {
         }
     }
 }
-public final class HuePairingService {
+public actor HuePairingService {
     private let trust: HueTrustConfiguration
+    private var session: URLSession?
+    private var closed = false
     public init(trust: HueTrustConfiguration) { self.trust = trust }
+    public func close() { closed = true; session?.invalidateAndCancel(); session = nil }
+    private func checkOpen() throws { try Task.checkCancellation(); if closed { throw CancellationError() } }
     public static func request(host: String) throws -> URLRequest {
         // Reuse strict host construction; this synthetic value is never sent.
         let factory = HueRequestFactory(configuration: .init(host: host, applicationKey: "validation-only"))
@@ -48,25 +52,31 @@ public final class HuePairingService {
         return key
     }
     public func verifyBridge() async throws {
+        try checkOpen()
         var request = try Self.request(host: trust.host)
         request.url = request.url!.appendingPathComponent("config")
         request.httpMethod = "GET"; request.httpBody = nil
         let delegate = SecureSessionDelegate(trust: trust)
         let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+        self.session = session
         defer { session.invalidateAndCancel() }
         let (data, response) = try await session.data(for: request)
+        try checkOpen()
         guard (response as? HTTPURLResponse)?.statusCode == 200,
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               (object["bridgeid"] as? String)?.lowercased() == trust.bridgeID else { throw PairingError.invalidResponse }
     }
     /// Exactly one registration attempt per explicit UI action. Never auto-retries POST.
     public func pair() async throws -> String {
+        try checkOpen()
         let delegate = SecureSessionDelegate(trust: trust)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil; configuration.httpCookieStorage = nil
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        self.session = session
         defer { session.invalidateAndCancel() }
         let (data, response) = try await session.data(for: Self.request(host: trust.host))
+        try checkOpen()
         guard let response = response as? HTTPURLResponse else { throw PairingError.invalidResponse }
         return try Self.decode(data, status: response.statusCode)
     }
@@ -85,6 +95,10 @@ public enum BridgeKeychain {
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = item as? Data, let key = String(data: data, encoding: .utf8), !key.isEmpty else { throw PairingError.keychain(status) }
         return key
+    }
+    public static func remove(bridgeID: String) throws {
+        let status = SecItemDelete(query(bridgeID) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw PairingError.keychain(status) }
     }
     public static func save(_ key: String, bridgeID: String) throws {
         var item = query(bridgeID)

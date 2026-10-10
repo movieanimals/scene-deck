@@ -15,3 +15,7 @@ xcrun swiftc "${FLAGS[@]}" -parse-as-library -I "$BUILD" -L "$BUILD" -lHueCore T
 "$BUILD/ClientChecks"
 xcrun swiftc "${FLAGS[@]}" -parse-as-library -I "$BUILD" -L "$BUILD" -lHueCore Tests/PairingChecks.swift -o "$BUILD/PairingChecks" -Xlinker -rpath -Xlinker @executable_path
 "$BUILD/PairingChecks"
+xcrun swiftc "${FLAGS[@]}" -parse-as-library -I "$BUILD" -L "$BUILD" -lHueCore Tests/SceneFileChecks.swift -o "$BUILD/SceneFileChecks" -Xlinker -rpath -Xlinker @executable_path
+"$BUILD/SceneFileChecks"
+xcrun swiftc "${FLAGS[@]}" -parse-as-library -I "$BUILD" -L "$BUILD" -lHueCore Tests/ReadConnectionChecks.swift -o "$BUILD/ReadConnectionChecks" -Xlinker -rpath -Xlinker @executable_path
+"$BUILD/ReadConnectionChecks"

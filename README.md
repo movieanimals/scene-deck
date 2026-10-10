@@ -13,9 +13,9 @@ Requires Apple silicon and macOS 13 or later. Extract the ZIP, move **Scene Deck
 3. Press the physical Bridge button, then choose **I pressed the Bridge button — Pair**.
 4. Review your loaded scenes, then choose **Finish setup & enable controls**. This enables your own scene clicks and brightness adjustments; completing setup itself changes no lights.
 
-Each Mac pairs separately and stores its own Bridge access key in device-only macOS Keychain. The app package contains no credentials, private Bridge configuration, or scene inventory. A MacBook must pair for itself. Saved connections reconnect on that Mac after setup is complete. A rebuilt ad-hoc-signed app may require renewed Keychain access.
+Each Mac pairs separately and stores its own Bridge access key in device-only macOS Keychain. The app package contains no credentials, private Bridge configuration, or scene inventory. A MacBook must pair for itself. Saved connections restore on launch after setup is complete, except when paused after sleep. Sleep closes active sessions and persists a pause across relaunches; wake never reconnects automatically. Choose **Reconnect** when ready. A rebuilt ad-hoc-signed app may require renewed Keychain access.
 
-Demo mode is available before connection. Favorites are local. Search with **⌘F**, star scenes for the menu bar, click a scene to recall it, and release a brightness slider to commit its room/zone level. Real group power controls are not included in this release.
+Demo mode is available before connection; launch with `open "dist/Scene Deck.app" --args --demo` to keep a verification run offline. Favorites are local. Search with **⌘F**, star scenes for the menu bar, click a scene to recall it, and release a brightness slider to commit its room/zone level. Real group power controls are not included in this release.
 
 ## Build and test
 
@@ -37,8 +37,12 @@ The supplied Swift package also includes XCTest tests for a full Xcode installat
 - HTTPS only; redirects refused. App-scoped, pinned OpenHue-published CA roots validate server chain, validity, exact endpoint and Bridge identity. No system roots installed. The legacy CN policy is explicit; see [trust provenance](docs/TRUST-PROVENANCE.md).
 - Pairing is one attempt per explicit user action. No key is printed, exported, or included in screenshots. Registration and saved-connection failures fail closed.
 - Setup loads resources read-only. Control is enabled by explicit setup completion. Live updates invalidate/refetch authoritative Bridge state; command receipts never invent active scenes.
-- Existing scenes are primary. Scene editing, scene-gallery assets, dynamic playback controls, and iPhone feature parity are not promised.
+- Existing scenes are primary. **Scene files & editor** supports local import/export and static scene creation/editing with explicit room/light mapping and a final preview. See [scene files](docs/SCENE-FILES.md). Dynamic playback editing, proprietary gallery assets, and iPhone feature parity are outside this version.
 - Real read-only pairing and inventory were verified. Scene/brightness writes were tested using mocks; no physical light changes were made during development verification.
+
+## Distribution
+
+The [release checklist](docs/DISTRIBUTION.md) documents Developer ID signing, notarization, and clean-Mac validation needed for a public download. No Apple account changes or public release have been made.
 
 ## Homepage handoff
 

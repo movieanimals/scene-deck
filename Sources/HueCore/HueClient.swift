@@ -47,6 +47,10 @@ public struct HueRequestFactory {
         try validID(id); guard value.isFinite, (0...100).contains(value) else { throw HueError.invalidBrightness }
         return try request(path: "/clip/v2/resource/grouped_light/\(id)", method: "PUT", body: ["dimming": ["brightness": value]])
     }
+    public func sceneWrite(_ plan: SceneWritePlan) throws -> URLRequest {
+        if let id = plan.sceneID { try validID(id); return try request(path: "/clip/v2/resource/scene/\(id)", method: "PUT", body: plan.body) }
+        return try request(path: "/clip/v2/resource/scene", method: "POST", body: plan.body)
+    }
     public func events() throws -> URLRequest {
         var result = try request(path: "/eventstream/clip/v2"); result.setValue("text/event-stream", forHTTPHeaderField: "Accept"); result.timeoutInterval = 90; return result
     }
@@ -87,6 +91,12 @@ public final class HueClient {
         delegate = SecureSessionDelegate(trust: trust)
     }
     deinit { /* No session is created merely to tear it down. Owner calls close after use. */ }
+    public func relocatedCopy(host: String, bridgeID: String) -> HueClient {
+        HueClient(configuration: .init(host: host, applicationKey: factory.configuration.applicationKey), access: access, trust: .init(host: host, bridgeID: bridgeID))
+    }
+    public func readOnlyCopy(host: String, bridgeID: String) -> HueClient {
+        HueClient(configuration: .init(host: host, applicationKey: factory.configuration.applicationKey), access: .readOnly, trust: .init(host: host, bridgeID: bridgeID))
+    }
     public func close() { if access != .blocked && transport == nil { session.invalidateAndCancel() } }
     private func authorize(write: Bool = false) throws {
         guard access != .blocked, !write || access == .control else { throw HueError.approvalRequired }
@@ -108,7 +118,7 @@ public final class HueClient {
     }
     private struct WriteStatus: Decodable { let errors: [HueAPIError] }
     private struct WriteAcknowledgment: Decodable { let data: [HueResource.Reference] }
-    private func sendWrite(_ request: URLRequest, expectedID: String, expectedType: String) async throws {
+    private func sendWrite(_ request: URLRequest, expectedID: String?, expectedType: String) async throws -> String {
         let (data, response) = try await exchange(request)
         guard let http = response as? HTTPURLResponse else { throw HueError.malformedResponse }
         guard (200...299).contains(http.statusCode) else { throw HueError.http(http.statusCode) }
@@ -117,11 +127,16 @@ public final class HueClient {
         // A write acknowledges resources; it does not return an authoritative resource snapshot.
         // Do not require resource id/type/metadata fields, or optimistically project this into home state.
         let acknowledgment = try JSONDecoder().decode(WriteAcknowledgment.self, from: data)
-        guard acknowledgment.data.contains(where: { $0.rid == expectedID && $0.rtype == expectedType }) else { throw HueError.malformedResponse }
+        guard let receipt = acknowledgment.data.first(where: { (expectedID == nil || $0.rid == expectedID) && $0.rtype == expectedType }), !receipt.rid.isEmpty else { throw HueError.malformedResponse }
+        return receipt.rid
     }
     public func resources() async throws -> [HueResource] { try authorize(); return try await send(factory.resources()).data }
-    public func recall(_ id: String) async throws { try authorize(write: true); try await sendWrite(factory.recall(id: id), expectedID: id, expectedType: "scene") }
-    public func brightness(_ id: String, value: Double) async throws { try authorize(write: true); try await sendWrite(factory.brightness(id: id, value: value), expectedID: id, expectedType: "grouped_light") }
+    public func recall(_ id: String) async throws { try authorize(write: true); _ = try await sendWrite(factory.recall(id: id), expectedID: id, expectedType: "scene") }
+    public func brightness(_ id: String, value: Double) async throws { try authorize(write: true); _ = try await sendWrite(factory.brightness(id: id, value: value), expectedID: id, expectedType: "grouped_light") }
+    public func saveScene(_ plan: SceneWritePlan) async throws -> String {
+        try authorize(write: true)
+        return try await sendWrite(factory.sceneWrite(plan), expectedID: plan.sceneID, expectedType: "scene")
+    }
     /// Invalidates a snapshot for each complete event frame. Caller owns coalescing, refetch, backoff and cancellation.
     public func listen(onChange: @escaping () async -> Void) async throws {
         try authorize()

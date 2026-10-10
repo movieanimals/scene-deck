@@ -1,0 +1,10 @@
+{
+  "format": "scene-deck.scene",
+  "version": 1,
+  "name": "Warm evening",
+  "groupLabel": "Living room",
+  "lights": [
+    {"slot": "floor-lamp", "label": "Floor lamp", "state": {"on": true, "brightness": 35, "mirek": 400}},
+    {"slot": "table-lamp", "label": "Table lamp", "state": {"on": true, "brightness": 22, "mirek": 400}}
+  ]
+}

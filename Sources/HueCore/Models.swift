@@ -21,6 +21,7 @@ public struct LightScene: Identifiable, Equatable {
 public struct HomeSnapshot {
     public var groups: [SceneGroup]
     public var scenes: [LightScene]
+    public var resources: [HueResource] = []
     public mutating func recall(_ id: String) throws {
         guard let scene = scenes.first(where: { $0.id == id }), let index = groups.firstIndex(where: { $0.id == scene.groupID }) else { throw HueError.invalidResource }
         groups[index].activeSceneID = id
@@ -48,7 +49,7 @@ public struct HomeSnapshot {
             let active = resources.first { $0.type == "scene" && $0.group?.rid == r.id && ["static", "dynamic_palette"].contains($0.status?.active ?? "") }?.id
             return SceneGroup(id: r.id, name: r.metadata?.name ?? "Unnamed group", kind: r.type, serviceID: serviceID, brightness: service?.dimming?.brightness, isOn: service?.on?.on, activeSceneID: active)
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        return HomeSnapshot(groups: groups, scenes: scenes)
+        return HomeSnapshot(groups: groups, scenes: scenes, resources: resources)
     }
 }
 public enum DemoHome {
@@ -62,12 +63,25 @@ public enum DemoHome {
             ("Daybreak", ["BC8C66", "E0C9A0", "EEE7CA"], 90, "Clear · focused"),
             ("Northern sky", ["233B51", "3B817D", "A1C8A0"], 60, "Fresh · spacious")]
         let scenes = groups.flatMap { group in palettes.enumerated().map { i, p in LightScene(id: "\(group.id)-\(i)", name: p.0, groupID: group.id, colors: p.1, brightness: p.2, detail: p.3) } }
-        return HomeSnapshot(groups: groups, scenes: scenes)
+        // Synthetic capabilities let the local editor/export flow work without any Bridge.
+        var wire: [[String: Any]] = []
+        for group in groups {
+            let lightIDs = [group.id + "-lamp-1", group.id + "-lamp-2"]
+            wire.append(["id": group.id, "type": group.kind, "metadata": ["name": group.name], "children": lightIDs.map { ["rid": $0, "rtype": "light"] }])
+            for (index, id) in lightIDs.enumerated() {
+                wire.append(["id": id, "type": "light", "metadata": ["name": index == 0 ? "Floor lamp" : "Table lamp"], "on": ["on": true], "dimming": ["brightness": group.brightness ?? 50], "color": ["xy": ["x": 0.4, "y": 0.4]], "color_temperature": ["mirek": 350, "mirek_schema": ["mirek_minimum": 153, "mirek_maximum": 500]] as [String: Any]])
+            }
+            for scene in scenes.filter({ $0.groupID == group.id }) {
+                wire.append(["id": scene.id, "type": "scene", "metadata": ["name": scene.name], "group": ["rid": group.id, "rtype": group.kind], "actions": lightIDs.map { id -> [String: Any] in ["target": ["rid": id, "rtype": "light"], "action": ["on": ["on": true], "dimming": ["brightness": scene.brightness ?? 50]] as [String: Any]] }])
+            }
+        }
+        let resources = (try? JSONDecoder().decode([HueResource].self, from: JSONSerialization.data(withJSONObject: wire))) ?? []
+        return HomeSnapshot(groups: groups, scenes: scenes, resources: resources)
     }
 }
 
-// Provisional minimal v2 wire subset. Unknown resource kinds and absent capabilities are preserved.
-// Confirm against the gated official reference before enabling real Bridge transport.
+// Minimal v2 wire subset, checked against public OpenHue schemas and read-only inventory.
+// Unknown resource kinds and absent capabilities do not imply support for a control.
 public struct HueEnvelope: Decodable {
     public let errors: [HueAPIError]
     public let data: [HueResource]
@@ -82,21 +96,51 @@ public struct HueResource: Decodable {
     public let on: OnState?
     public let dimming: Dimming?
     public let status: Status?
-    private enum CodingKeys: String, CodingKey { case id, type, metadata, group, services, on, dimming, status }
+    public let children: [Reference]?
+    public let owner: Reference?
+    public let color: ColorState?
+    public let colorTemperature: Temperature?
+    public let actions: [Action]?
+    private enum CodingKeys: String, CodingKey { case id, type, metadata, group, services, on, dimming, status, children, owner, color, color_temperature, actions }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(String.self, forKey: .id)
         type = try values.decode(String.self, forKey: .type)
-        metadata = ["scene", "room", "zone"].contains(type) ? try values.decodeIfPresent(Metadata.self, forKey: .metadata) : nil
+        metadata = ["scene", "room", "zone", "light"].contains(type) ? try values.decodeIfPresent(Metadata.self, forKey: .metadata) : nil
         group = type == "scene" ? try values.decodeIfPresent(Reference.self, forKey: .group) : nil
-        services = ["room", "zone"].contains(type) ? try values.decodeIfPresent([Reference].self, forKey: .services) : nil
-        on = type == "grouped_light" ? try values.decodeIfPresent(OnState.self, forKey: .on) : nil
-        dimming = type == "grouped_light" ? try values.decodeIfPresent(Dimming.self, forKey: .dimming) : nil
+        services = ["room", "zone", "device"].contains(type) ? try values.decodeIfPresent([Reference].self, forKey: .services) : nil
+        on = ["grouped_light", "light"].contains(type) ? try values.decodeIfPresent(OnState.self, forKey: .on) : nil
+        dimming = ["grouped_light", "light"].contains(type) ? try values.decodeIfPresent(Dimming.self, forKey: .dimming) : nil
         status = type == "scene" ? try values.decodeIfPresent(Status.self, forKey: .status) : nil
+        children = ["room", "zone"].contains(type) ? try values.decodeIfPresent([Reference].self, forKey: .children) : nil
+        owner = type == "light" ? try values.decodeIfPresent(Reference.self, forKey: .owner) : nil
+        color = type == "light" ? try values.decodeIfPresent(ColorState.self, forKey: .color) : nil
+        colorTemperature = type == "light" ? try values.decodeIfPresent(Temperature.self, forKey: .color_temperature) : nil
+        actions = type == "scene" ? try values.decodeIfPresent([Action].self, forKey: .actions) : nil
     }
     public struct Metadata: Decodable { public let name: String? }
     public struct Reference: Decodable { public let rid: String; public let rtype: String }
     public struct OnState: Decodable { public let on: Bool }
     public struct Dimming: Decodable { public let brightness: Double }
+    public struct ColorState: Decodable { public let xy: SceneXY? }
+    public struct Temperature: Decodable {
+        public let mirek: Int?
+        public let mirek_schema: Schema?
+        public struct Schema: Decodable { public let mirek_minimum: Int; public let mirek_maximum: Int }
+    }
+    public struct Action: Decodable { public let target: Reference; public let action: ActionBody }
+    public struct ActionBody: Decodable {
+        public let on: OnState?; public let dimming: Dimming?; public let color: ColorState?; public let color_temperature: Temperature?
+        public let unsupported: Bool
+        struct Key: CodingKey { var stringValue: String; var intValue: Int? { nil }; init?(stringValue: String) { self.stringValue = stringValue }; init?(intValue: Int) { return nil } }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Key.self)
+            on = try c.decodeIfPresent(OnState.self, forKey: Key(stringValue: "on")!)
+            dimming = try c.decodeIfPresent(Dimming.self, forKey: Key(stringValue: "dimming")!)
+            color = try c.decodeIfPresent(ColorState.self, forKey: Key(stringValue: "color")!)
+            color_temperature = try c.decodeIfPresent(Temperature.self, forKey: Key(stringValue: "color_temperature")!)
+            unsupported = !Set(c.allKeys.map(\.stringValue)).isSubset(of: ["on", "dimming", "color", "color_temperature"])
+        }
+    }
     public struct Status: Decodable { public let active: String? }
 }

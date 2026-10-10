@@ -8,5 +8,12 @@
   "repositoryVisibility": "private",
   "downloadURL": null,
   "integrationStatus": "Ready for separate homepage editor",
-  "launchBehavior": "Link to a real download when published; do not embed the native app."
+  "launchBehavior": "Link to a real download when published; do not embed the native app.",
+  "version": "0.3.0",
+  "features": [
+    "Scene library and favorites",
+    "Menu bar controls",
+    "Portable scene files and static editor",
+    "Explicit reconnect after sleep"
+  ]
 }

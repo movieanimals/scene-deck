@@ -10,16 +10,24 @@ import HueCore
     private var pendingRefresh: Task<Void, Never>?
     private var dirty = false
     private var generation = 0
+    private(set) var paused = false
+    @Published private(set) var authorizationRequired = false
     private let fetch: () async throws -> [HueResource]
     private let events: (@escaping () async -> Void) async throws -> Void
     private let close: () -> Void
-    convenience init(client: HueClient) {
-        self.init(fetch: { try await client.resources() }, events: { try await client.listen(onChange: $0) }, close: { client.close() })
+    convenience init(client: HueClient, bridgeID: String = "", host: String = "", addressChanged: @escaping (String) -> Void = { _ in }) {
+        if bridgeID.isEmpty || host.isEmpty {
+            self.init(fetch: { try await client.resources() }, events: { try await client.listen(onChange: $0) }, close: { client.close() })
+        } else {
+            let connection = HueReadConnection(client: client, bridgeID: bridgeID, host: host, addressChanged: addressChanged)
+            self.init(fetch: { try await connection.resources() }, events: { try await connection.listen(onChange: $0) }, close: { Task { await connection.close() } })
+        }
     }
     init(fetch: @escaping () async throws -> [HueResource], events: @escaping (@escaping () async -> Void) async throws -> Void, close: @escaping () -> Void) {
         self.fetch = fetch; self.events = events; self.close = close
     }
     func start() {
+        guard !paused, !authorizationRequired else { return }
         stop()
         let token = generation
         let fetch = fetch, events = events
@@ -35,8 +43,12 @@ import HueCore
                         guard self?.generation == token else { return }
                         self?.scheduleRefresh()
                     }
-                    delay = 1
                 } catch is CancellationError { break }
+                catch HueError.http(let code) where code == 401 || code == 403 {
+                    guard self?.generation == token else { break }
+                    self?.revokeAccess()
+                    break
+                }
                 catch { }
                 guard !Task.isCancelled, self?.generation == token else { break }
                 self?.status = "Connection interrupted. Retrying…"
@@ -60,12 +72,19 @@ import HueCore
                     self?.snapshot = HomeSnapshot.project(resources)
                     self?.status = "Live"
                 } while self?.dirty == true
+            } catch HueError.http(let code) where code == 401 || code == 403 {
+                if !Task.isCancelled, self?.generation == token { self?.revokeAccess() }
             } catch {
                 if !Task.isCancelled, self?.generation == token { self?.status = "Refresh failed. Reconnect to try again." }
             }
             if self?.generation == token { self?.pendingRefresh = nil }
         }
     }
+    private func revokeAccess() {
+        stop(); close(); authorizationRequired = true
+        status = "Bridge access was revoked. Reconnect explicitly to recover."
+    }
+    func pauseForSleep() { stop(); close(); paused = true; status = "Paused after sleep. Choose Reconnect when ready." }
     func stop() {
         generation += 1
         task?.cancel(); task = nil

@@ -100,6 +100,51 @@ import HueCore
         try await Task.sleep(nanoseconds: 10_000_000)
         check(coordinated.snapshot?.groups.isEmpty == true, "Late pre-command response cannot replace newer snapshot")
         coordinated.stop()
+        var revokedFetches = 0
+        var revokedCallback: (() async -> Void)?
+        var revokedClosed = false
+        let revoked = BridgeSynchronizer(fetch: {
+            revokedFetches += 1
+            if revokedFetches > 1 { throw HueError.http(403) }
+            return []
+        }, events: { revokedCallback = $0; try await Task.sleep(nanoseconds: 60_000_000_000) }, close: { revokedClosed = true })
+        revoked.start()
+        for _ in 0..<100 where revokedCallback == nil { try await Task.sleep(nanoseconds: 1_000_000) }
+        await revokedCallback?()
+        for _ in 0..<100 where !revoked.authorizationRequired { try await Task.sleep(nanoseconds: 10_000_000) }
+        check(revoked.authorizationRequired && revokedClosed, "Revoked access during event refresh closes listener and requires recovery")
+        revoked.start(); await revokedCallback?()
+        try await Task.sleep(nanoseconds: 300_000_000)
+        check(revokedFetches == 2, "Revocation blocks later callbacks and automatic restart")
+        var sleepingFetches = 0
+        var sleepingClosed = false
+        let sleeping = BridgeSynchronizer(fetch: { sleepingFetches += 1; throw HueError.http(503) }, events: { _ in }, close: { sleepingClosed = true })
+        sleeping.start()
+        for _ in 0..<100 where sleepingFetches == 0 { try await Task.sleep(nanoseconds: 1_000_000) }
+        sleeping.pauseForSleep(); sleeping.start()
+        try await Task.sleep(nanoseconds: 1_100_000_000)
+        check(sleeping.paused && sleepingClosed && sleepingFetches == 1, "Sleep closes read transport and cancels retry without automatic wake restart")
+        store.connection.bridgeID = "synthetic-household-a"
+        store.connection.host = "unit-test.invalid"
+        store.connect(snapshot: DemoHome.make(), client: noNetworkClient)
+        store.selection = "bedroom"; store.favorite(store.home.scenes[0])
+        let householdAFavorites = store.favorites
+        store.connection.bridgeID = "synthetic-household-b"
+        store.connect(snapshot: DemoHome.make(), client: noNetworkClient)
+        check(store.favorites.isEmpty && store.selection == "all", "Another household receives separate favorites and view")
+        store.selection = "studio"
+        store.connection.bridgeID = "synthetic-household-a"
+        store.connect(snapshot: DemoHome.make(), client: noNetworkClient)
+        check(store.favorites == householdAFavorites && store.selection == "bedroom", "Returning household restores its own preferences")
+        store.enableControls(recall: { recalls.append($0) }, brightness: { levels.append(($0, $1)) }, fetch: { [] })
+        store.pauseForSleep()
+        let commandCount = recalls.count + levels.count
+        store.activate(store.home.scenes[0]); store.brightness(store.home.groups[0], 80)
+        check(store.pausedAfterSleep && !store.controlsEnabled && store.controlsDisabled && recalls.count + levels.count == commandCount, "Sleep disables all commands until explicit reconnect")
+        defaults.set(store.connection.bridgeID, forKey: "bridgeID"); defaults.set(store.connection.host, forKey: "bridgeHost")
+        defaults.set(true, forKey: "setupComplete-" + store.connection.bridgeID)
+        let afterSleep = SceneStore(defaults: defaults)
+        check(afterSleep.pausedAfterSleep && !afterSleep.isLive && !afterSleep.connection.busy, "Pause persists across app relaunch without Keychain or connection attempts")
         print("\(count) store checks passed. No network requests made.")
     }
 }
