@@ -48,7 +48,8 @@ struct LibraryView: View {
                 Text("Scene Deck").font(.system(size: 20, weight: .semibold, design: .rounded))
             }.padding(.top, 30).padding(.bottom, 34).padding(.horizontal, 20)
             nav("All scenes", icon: "square.grid.2x2", id: "all", count: store.home.scenes.count)
-            nav("Favorites", icon: "star", id: "favorites", count: store.favorites.count)
+            nav("Favorites", icon: "star", id: "favorites", count: store.favoriteScenes.count)
+            nav("Recently played", icon: "clock", id: "recent", count: store.recentScenes.count)
             Text("ROOMS").font(.system(size: 10, weight: .semibold)).tracking(1.1).foregroundColor(Theme.muted).padding(.horizontal, 22).padding(.top, 32).padding(.bottom, 10)
             ForEach(store.home.groups.filter { $0.kind == "room" }) { group in nav(group.name, icon: group.icon, id: group.id) }
             Text("ZONES").font(.system(size: 10, weight: .semibold)).tracking(1.1).foregroundColor(Theme.muted).padding(.horizontal, 22).padding(.top, 24).padding(.bottom, 10)
@@ -57,7 +58,7 @@ struct LibraryView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Label(store.isLive ? "Your Hue Bridge" : "Demo home", systemImage: "house").font(.system(size: 13, weight: .semibold))
                 Text(store.isLive ? (store.controlsEnabled ? "Your scenes, connected.\nChanges stay in sync." : "Your scenes are connected.\nFinish setup to control lights.") : "Explore freely. Your lights\naren’t connected.").font(.system(size: 12)).foregroundColor(Theme.muted).lineSpacing(3)
-                Button { store.showConnection = true } label: { HStack { Text("Connect a Bridge"); Spacer(); Image(systemName: "arrow.right") }.font(.system(size: 12, weight: .medium)) }.buttonStyle(.plain).foregroundColor(Theme.accent).padding(.top, 4)
+                Button { store.showConnection = true } label: { HStack { Text(store.isLive ? "Bridge settings" : "Connect a Bridge"); Spacer(); Image(systemName: "arrow.right") }.font(.system(size: 12, weight: .medium)) }.buttonStyle(.plain).foregroundColor(Theme.accent).padding(.top, 4)
             }.padding(20)
         }.background(Theme.sidebar)
     }
@@ -82,11 +83,13 @@ struct LibraryView: View {
                     Text("A different atmosphere, one click away.").font(.system(size: 13)).foregroundColor(Theme.muted)
                 }
                 Spacer()
-                Button("Scene files & editor…") { store.showSceneEditor = true }.disabled(store.home.resources.isEmpty || store.pausedAfterSleep)
+                Button("Scene files & editor…") { store.edit() }.disabled(store.home.resources.isEmpty || store.pausedAfterSleep)
                 Menu {
+                    if !store.isLive {
                     Button("Simulate a Bridge event") { store.simulateExternalChange() }
                     Button(store.simulatedOffline ? "Restore demo connection" : "Simulate offline Bridge") { store.simulatedOffline.toggle() }
                     Button("Reset demo rooms") { store.reset() }
+                    }
                     Divider()
                     Button("Reconnect") { Task { await store.restoreConnection() } }
                     Button("Connection setup…") { store.showConnection = true }
@@ -104,9 +107,9 @@ struct LibraryView: View {
     private var emptyState: some View {
         VStack(spacing: 14) {
             Image(systemName: store.search.isEmpty ? "star" : "magnifyingglass").font(.system(size: 32)).foregroundColor(Theme.accent)
-            Text(store.search.isEmpty ? "Keep your best scenes close" : "No scenes found").font(.title2)
-            Text(store.search.isEmpty ? "Star any scene to keep it here and in your menu bar." : "Try another name, or clear your search.").foregroundColor(Theme.muted)
-            Button(store.search.isEmpty ? "Browse all scenes" : "Clear search") { store.search = ""; if store.selection == "favorites" { store.selection = "all" } }
+            Text(store.search.isEmpty ? (store.selection == "recent" ? "Your next scene starts here" : "Keep your best scenes close") : "No scenes found").font(.title2)
+            Text(store.search.isEmpty ? (store.selection == "recent" ? "Scenes you play will appear here, most recent first." : "Star any scene to keep it here and in your menu bar.") : "Try another name, or clear your search.").foregroundColor(Theme.muted)
+            Button(store.search.isEmpty ? "Browse all scenes" : "Clear search") { store.search = ""; if ["favorites", "recent"].contains(store.selection) { store.selection = "all" } }
         }.frame(maxWidth: .infinity).padding(.vertical, 90)
     }
 }
@@ -127,7 +130,7 @@ struct GroupHeader: View {
                 GroupBrightnessSlider(group: group, level: level).frame(width: 110)
                 Text("\(Int(level))%").monospacedDigit().font(.system(size: 12)).foregroundColor(Theme.muted).frame(width: 34, alignment: .trailing)
             }
-            if let on = group.isOn, !store.isLive {
+            if let on = group.isOn {
                 Button { store.power(group) } label: { Image(systemName: "power").font(.system(size: 12, weight: .semibold)).frame(width: 28, height: 28).background(on ? Theme.accent : Theme.surface).foregroundColor(on ? Theme.canvas : Theme.muted).clipShape(Circle()) }.buttonStyle(.plain).accessibilityLabel("Turn \(group.name) \(on ? "off" : "on")").help("Turn \(group.name) \(on ? "off" : "on")").disabled(store.controlsDisabled)
             }
         }
@@ -160,6 +163,13 @@ struct SceneTile: View {
         }.background(Theme.surface).cornerRadius(14)
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(active ? Theme.accent : Color.clear, lineWidth: 1.5))
             .onHover { hovered = $0 }
+            .contextMenu {
+                Button("Play scene") { store.activate(scene) }.disabled(store.controlsDisabled)
+                Button(store.favorites.contains(scene.id) ? "Remove favorite" : "Add favorite") { store.favorite(scene) }
+                Divider()
+                Button("Edit / export scene…") { store.edit(scene) }.disabled(store.pausedAfterSleep)
+                Button("Duplicate scene…") { store.edit(scene, duplicate: true) }.disabled(store.pausedAfterSleep)
+            }
     }
 }
 

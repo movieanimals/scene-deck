@@ -13,10 +13,10 @@ struct MenuView: View {
                 Button("Reconnect") { Task { await store.restoreConnection() } }.disabled(store.connection.busy)
             }
             Divider()
-            if store.favorites.isEmpty { Text("Star scenes in the library to keep them here.").font(.callout).foregroundColor(Theme.muted) }
+            if store.favoriteScenes.isEmpty { Text("Star scenes in the library to keep them here.").font(.callout).foregroundColor(Theme.muted) }
             ScrollView {
                 VStack(spacing: 6) {
-                    ForEach(store.home.scenes.filter { store.favorites.contains($0.id) }) { scene in
+                    ForEach(store.favoriteScenes) { scene in
                         Button { store.activate(scene) } label: {
                             HStack(spacing: 10) {
                                 SceneArtwork(colors: scene.colors).frame(width: 38, height: 36).cornerRadius(6)
@@ -34,6 +34,9 @@ struct MenuView: View {
             Divider()
             ForEach(store.home.groups.filter { $0.kind == "room" }) { group in
                 HStack {
+                    if let on = group.isOn {
+                        Button { store.power(group) } label: { Image(systemName: "power").foregroundColor(on ? Theme.accent : Theme.muted) }.buttonStyle(.plain).disabled(store.controlsDisabled).help("Turn \(group.name) \(on ? "off" : "on")")
+                    }
                     Text(group.name).font(.system(size: 11)).frame(width: 78, alignment: .leading)
                     if let level = group.brightness {
                         GroupBrightnessSlider(group: group, level: level)

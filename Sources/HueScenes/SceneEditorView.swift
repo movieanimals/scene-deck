@@ -24,7 +24,7 @@ struct SceneEditorView: View {
             HStack { Text("Scene files & editor").font(.title2.bold()); Spacer(); Button("Done") { dismiss() }.disabled(applying) }
             Text("Local Scene Deck JSON · static on/off, brightness, color and warmth · no cloud upload").font(.caption).foregroundColor(.secondary)
             HStack {
-                Picker("Room / zone", selection: $groupID) { ForEach(store.home.groups) { Text($0.name).tag($0.id) } }.disabled(editingID != nil)
+                Picker("Room / zone", selection: Binding(get: { groupID }, set: { groupID = $0; mapping = [:]; sourceSceneID = "" })) { ForEach(store.home.groups) { Text($0.name).tag($0.id) } }.disabled(editingID != nil)
                 Button("New from current lights") { newDraft() }
                 Button("Import file…") { importFile() }
             }.disabled(applying)
@@ -63,8 +63,12 @@ struct SceneEditorView: View {
             if !store.controlsEnabled { Text("You can prepare and export files now. Finish Bridge setup to save scenes to the Bridge.").font(.caption).foregroundColor(Theme.accent) }
         }.padding(26).frame(width: 760).background(Theme.canvas).foregroundColor(Theme.ink).preferredColorScheme(.dark)
         .disabled(applying).interactiveDismissDisabled(applying)
-        .onAppear { groupID = store.home.groups.first(where: { $0.id == store.selection })?.id ?? store.home.groups.first?.id ?? "" }
-        .onChange(of: groupID) { _ in mapping = [:]; sourceSceneID = "" }
+        .onAppear {
+            if let scene = store.home.scenes.first(where: { $0.id == store.editorSceneID }) {
+                groupID = scene.groupID; sourceSceneID = scene.id; loadScene()
+                if loaded && store.editorDuplicate { editingID = nil; original = nil; document.name = String((document.name + " copy").prefix(32)); message = "Copy prepared locally. Review it, then preview to save a new scene." }
+            } else { groupID = store.home.groups.first(where: { $0.id == store.selection })?.id ?? store.home.groups.first?.id ?? "" }
+        }
         .sheet(item: $preview) { p in
             VStack(alignment: .leading, spacing: 18) {
                 Text(p.editingID == nil ? "Create this scene?" : "Replace this scene’s settings?").font(.title2.bold())
@@ -130,12 +134,25 @@ private struct SceneStateEditor: View {
             }
             HStack {
                 Picker("Color", selection: Binding(get: { state.xy != nil ? "xy" : state.mirek != nil ? "warmth" : "none" }, set: { mode in state.xy = mode == "xy" ? SceneXY(x: 0.3, y: 0.3) : nil; state.mirek = mode == "warmth" ? 300 : nil })) {
-                    Text("Unchanged").tag("none"); Text("Warmth").tag("warmth"); Text("Color coordinates").tag("xy")
+                    Text("Unchanged").tag("none"); Text("Warmth").tag("warmth"); Text("Color picker").tag("xy")
                 }.frame(width: 260)
-                if state.mirek != nil { Slider(value: Binding(get: { Double(state.mirek ?? 300) }, set: { state.mirek = Int($0) }), in: 153...500, step: 1).frame(width: 150); Text("\(state.mirek ?? 300) mirek").font(.caption) }
+                if state.mirek != nil { Slider(value: Binding(get: { Double(state.mirek ?? 300) }, set: { state.mirek = Int($0) }), in: 153...500, step: 1).frame(width: 150); Text("\(1_000_000 / (state.mirek ?? 300)) K").font(.caption) }
                 if state.xy != nil {
-                    Text("x"); TextField("x", value: Binding(get: { state.xy?.x ?? 0.3 }, set: { state.xy?.x = $0 }), format: .number).frame(width: 80)
-                    Text("y"); TextField("y", value: Binding(get: { state.xy?.y ?? 0.3 }, set: { state.xy?.y = $0 }), format: .number).frame(width: 80)
+                    ColorPicker("Choose color", selection: Binding<Color>(get: {
+                        let rgb = SceneColor.rgb(state.xy ?? SceneXY(x: 0.3127, y: 0.3290))
+                        return Color(.sRGB, red: rgb.red, green: rgb.green, blue: rgb.blue)
+                    }, set: { color in
+                        if let rgb = NSColor(color).usingColorSpace(.sRGB), let xy = SceneColor.xy(red: rgb.redComponent, green: rgb.greenComponent, blue: rgb.blueComponent) { state.xy = xy }
+                    }), supportsOpacity: false)
+                }
+            }
+            if state.xy != nil {
+                Text("Screen preview is approximate; each bulb has its own color range. Use brightness or Off for black.").font(.caption).foregroundColor(.secondary)
+                DisclosureGroup("Advanced color coordinates") {
+                    HStack {
+                        Text("x"); TextField("x", value: Binding(get: { state.xy?.x ?? 0.3 }, set: { state.xy?.x = $0 }), format: .number).frame(width: 100)
+                        Text("y"); TextField("y", value: Binding(get: { state.xy?.y ?? 0.3 }, set: { state.xy?.y = $0 }), format: .number).frame(width: 100)
+                    }
                 }
             }
         }.font(.callout)

@@ -1,6 +1,6 @@
-# Distribution readiness — Scene Deck 0.3.1
+# Distribution readiness — Scene Deck 0.4.0 beta 1
 
-The current Apple-silicon/macOS 13+ ZIP is a locally built, ad-hoc-signed preview. It is not a notarized public download. Source remains in the private repository; no public publishing, Apple enrollment, certificate creation, or notarization submission has occurred.
+The current Apple-silicon/macOS 13+ ZIP is a locally built, ad-hoc-signed preview. It is not a notarized public download. The owner authorized public GitHub source and a prerelease. Apple enrollment, certificate creation, and notarization submission have not occurred. The public beta explicitly warns that downloaded builds may be blocked by Gatekeeper.
 
 ## Prepared
 
@@ -16,7 +16,7 @@ The current Apple-silicon/macOS 13+ ZIP is a locally built, ad-hoc-signed previe
 2. Sign every nested executable/library and then the app with that identity, Hardened Runtime, and a secure timestamp. Do not add `get-task-allow`, disable library validation, or blanket entitlements. These are [Apple's notarization requirements](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 3. An owner-approved notarization authentication profile, then submit the ZIP with `notarytool`, inspect the result/log, staple the accepted ticket to the app, validate it, and re-create the ZIP. Follow [Apple's command-line workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow). Both `notarytool` and `stapler` are present in this machine's Command Line Tools; no tool installation is required for those commands.
 4. Test the downloaded, quarantined artifact on a clean destination Mac: Gatekeeper acceptance, Local Network prompt, fresh physical-button pairing, Keychain persistence, sleep/wake pause, menu/window behavior, disconnect/revocation recovery, and deliberate real scene/brightness writes in a test room. No physical light changes were performed during this development session. Full accessibility/keyboard verification also remains outstanding because native UI automation timed out.
-5. Choose the public hosting/release URL and source-license/public-repository scope. Publish only the sanitized release artifact after those approvals. Keep private history, logs, Library identities, connected screenshots, and household data private. The homepage handoff intentionally leaves `downloadURL` null.
+5. Publish verified assets at the [GitHub prerelease](https://github.com/movieanimals/scene-deck/releases/tag/v0.4.0-beta.1). Keep local logs, Library identities, connected screenshots, and household data out of the repository and package. Public availability does not imply an open-source license grant.
 
 ## Signing recipe for the release owner (not executed)
 

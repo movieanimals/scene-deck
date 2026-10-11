@@ -44,6 +44,17 @@ import HueCore
         let brightness = try factory.brightness(id: "group", value: 42)
         let brightnessJSON = try JSONSerialization.jsonObject(with: brightness.httpBody!) as! [String: [String: Double]]
         check(brightnessJSON["dimming"]?["brightness"] == 42, "Brightness request contract fixture")
+        let power = try factory.power(id: "group", on: false)
+        let powerJSON = try JSONSerialization.jsonObject(with: power.httpBody!) as! [String: [String: Bool]]
+        check(power.httpMethod == "PUT" && power.url?.path == "/clip/v2/resource/grouped_light/group" && powerJSON["on"]?["on"] == false, "Power targets one grouped light with explicit off state")
+        rejects("Power rejects malformed target") { _ = try factory.power(id: "../group", on: true) }
+        let red = SceneColor.xy(red: 1, green: 0, blue: 0)!
+        check(abs(red.x - 0.64) < 0.001 && abs(red.y - 0.33) < 0.001, "sRGB red maps to standard chromaticity")
+        check(SceneColor.xy(red: 0, green: 0, blue: 0) == nil && SceneColor.xy(red: .nan, green: 1, blue: 1) == nil, "Black and nonfinite color do not invent coordinates")
+        let white = SceneColor.xy(red: 1, green: 1, blue: 1)!
+        check(abs(white.x - 0.3127) < 0.001 && abs(white.y - 0.3290) < 0.001, "sRGB white maps to D65")
+        let rgb = SceneColor.rgb(red)
+        check(rgb.red > 0.99 && rgb.green < 0.01 && rgb.blue < 0.01, "Chromaticity preview preserves red hue")
         rejects("HTTP failures are rejected") { _ = try HueClient.decode(Data(), status: 401) }
         rejects("API errors in HTTP 200 are rejected") { _ = try HueClient.decode(Data(#"{"errors":[{"description":"unauthorized"}],"data":[]}"#.utf8), status: 200) }
         let resources = try HueClient.decode(Data(#"{"errors":[],"data":[{"id":"g","type":"grouped_light","on":{"on":true}},{"id":"future","type":"future_resource"}]}"#.utf8), status: 200)

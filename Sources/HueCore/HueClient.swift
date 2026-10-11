@@ -47,6 +47,10 @@ public struct HueRequestFactory {
         try validID(id); guard value.isFinite, (0...100).contains(value) else { throw HueError.invalidBrightness }
         return try request(path: "/clip/v2/resource/grouped_light/\(id)", method: "PUT", body: ["dimming": ["brightness": value]])
     }
+    public func power(id: String, on: Bool) throws -> URLRequest {
+        try validID(id)
+        return try request(path: "/clip/v2/resource/grouped_light/\(id)", method: "PUT", body: ["on": ["on": on]])
+    }
     public func sceneWrite(_ plan: SceneWritePlan) throws -> URLRequest {
         if let id = plan.sceneID { try validID(id); return try request(path: "/clip/v2/resource/scene/\(id)", method: "PUT", body: plan.body) }
         return try request(path: "/clip/v2/resource/scene", method: "POST", body: plan.body)
@@ -135,6 +139,7 @@ public final class HueClient {
     public func resources() async throws -> [HueResource] { try authorize(); return try await send(factory.resources()).data }
     public func recall(_ id: String) async throws { try authorize(write: true); _ = try await sendWrite(factory.recall(id: id), expectedID: id, expectedType: "scene") }
     public func brightness(_ id: String, value: Double) async throws { try authorize(write: true); _ = try await sendWrite(factory.brightness(id: id, value: value), expectedID: id, expectedType: "grouped_light") }
+    public func power(_ id: String, on: Bool) async throws { try authorize(write: true); _ = try await sendWrite(factory.power(id: id, on: on), expectedID: id, expectedType: "grouped_light") }
     public func saveScene(_ plan: SceneWritePlan) async throws -> String {
         try authorize(write: true)
         return try await sendWrite(factory.sceneWrite(plan), expectedID: plan.sceneID, expectedType: "scene")

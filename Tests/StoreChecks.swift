@@ -40,6 +40,13 @@ import HueCore
         store.reset()
         check(store.home.groups[0].activeSceneID == "living-0", "Reset restores demo rooms")
         check(store.favorites.contains(scene.id), "Reset preserves favorites")
+        store.activate(store.home.scenes[1]); store.activate(store.home.scenes[2]); store.activate(store.home.scenes[1])
+        check(store.recentIDs == ["living-1", "living-2"], "Recent recalls are deduplicated newest first")
+        let recentRestored = SceneStore(defaults: defaults)
+        check(recentRestored.recentIDs == store.recentIDs, "Recent recalls persist locally")
+        store.selection = "recent"
+        check(store.scenes(in: "living").map(\.id) == ["living-1", "living-2"], "Recent filter retains recency within rooms")
+        store.selection = "all"
         var fetchCount = 0
         var callback: (() async -> Void)?
         var releaseFetch: CheckedContinuation<Void, Never>?
@@ -78,15 +85,28 @@ import HueCore
         for _ in 0..<100 where store.sending { try await Task.sleep(nanoseconds: 1_000_000) }
         check(recalls == [chosen.id], "Explicit scene action sends only selected scene ID")
         check(store.home.scenes.isEmpty, "Command state comes from authoritative refresh")
+        store.home = DemoHome.make()
         store.brightness(chosenGroup, 44)
         for _ in 0..<100 where store.sending { try await Task.sleep(nanoseconds: 1_000_000) }
         check(levels.count == 1 && levels[0].0 == chosenGroup.serviceID && levels[0].1 == 44, "Brightness targets grouped-light service")
         store.brightness(chosenGroup, .nan)
         check(levels.count == 1, "Invalid live brightness sends no request")
+        store.home = DemoHome.make()
+        var powerCommands: [(String, Bool)] = []
+        store.enableControls(recall: { _ in }, brightness: { _, _ in }, power: { powerCommands.append(($0, $1)) }, fetch: { [] })
+        store.power(chosenGroup)
+        for _ in 0..<100 where store.sending { try await Task.sleep(nanoseconds: 1_000_000) }
+        check(powerCommands.count == 1 && powerCommands[0].0 == chosenGroup.serviceID && powerCommands[0].1 == false, "Live power uses selected grouped-light service")
+        check(store.home.groups.isEmpty, "Power state is fetched instead of guessed")
+        store.power(chosenGroup); store.brightness(chosenGroup, 44)
+        check(powerCommands.count == 1 && levels.count == 1, "Stale group targets cannot send commands")
+        store.home = DemoHome.make()
+        let recentBeforeFailure = store.recentIDs
         store.enableControls(recall: { _ in throw HueError.http(503) }, brightness: { _, _ in throw HueError.http(503) }, fetch: { [] })
-        store.brightness(chosenGroup, 30)
+        store.activate(store.home.scenes[3])
         for _ in 0..<100 where store.sending { try await Task.sleep(nanoseconds: 1_000_000) }
         check(store.notice.contains("did not confirm") && !store.sending, "Failed commands release controls and report failure")
+        check(store.recentIDs == recentBeforeFailure, "Failed recall does not appear in recent scenes")
         var pendingReads: [CheckedContinuation<[HueResource], Error>] = []
         let coordinated = BridgeSynchronizer(fetch: { try await withCheckedThrowingContinuation { pendingReads.append($0) } }, events: { _ in try await Task.sleep(nanoseconds: 60_000_000_000) }, close: {})
         coordinated.start()

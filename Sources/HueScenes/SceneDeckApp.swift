@@ -10,6 +10,15 @@ import AppKit
         }.defaultSize(width: 1120, height: 820)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandMenu("Scenes") {
+                Button("Scene files & editor…") { store.edit() }.disabled(store.pausedAfterSleep)
+                Divider()
+                ForEach(Array(store.favoriteScenes.prefix(9).enumerated()), id: \.element.id) { index, scene in
+                    Button(scene.name + " · " + (store.home.groups.first { $0.id == scene.groupID }?.name ?? "Room")) { store.activate(scene) }
+                        .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
+                        .disabled(store.controlsDisabled)
+                }
+            }
             CommandMenu("Demo") {
                 Button("Simulate Bridge event") { store.simulateExternalChange() }
                 Button("Reset demo rooms") { store.reset() }

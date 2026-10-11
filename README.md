@@ -4,9 +4,19 @@ A native macOS Philips Hue controller built around your existing scenes: a full 
 
 ![Offline demo with sample scenes](docs/demo-library.png)
 
-## Run
+## Download the beta
 
-Requires Apple silicon and macOS 13 or later. Extract the ZIP, move **Scene Deck.app** into Applications, and open it. The app is locally ad-hoc signed, **not Developer ID signed or notarized**. A downloaded copy may be blocked by macOS. No security-warning bypass is recommended; use the source build below if needed. A notarized public download is not available.
+**[Download Scene Deck 0.4.0 beta 1 for Apple silicon](https://github.com/movieanimals/scene-deck/releases/download/v0.4.0-beta.1/Scene-Deck-macOS-arm64.zip)** · [Release notes and checksums](https://github.com/movieanimals/scene-deck/releases/tag/v0.4.0-beta.1)
+
+Requires **macOS 13 or later**, an **Apple silicon Mac** (M1 or newer), and a **Philips Hue Bridge with API v2** for real lights. Intel Macs and Bluetooth-only bulbs are not supported by this download. The offline demo needs no Bridge.
+
+1. Download **Scene-Deck-macOS-arm64.zip** from the link above or the release’s **Assets** list. The GitHub “Source code” archives are for building, not installing.
+2. Double-click the ZIP in Finder. Move **Scene Deck.app** to your Applications folder. Quit an older copy before replacing it; avoid launching a second copy from Downloads.
+3. Open **Scene Deck** from Applications. To keep it in the Dock, right-click its Dock icon → **Options → Keep in Dock**.
+
+**Beta signing limitation:** this build is ad-hoc signed, **not Developer ID signed or notarized**. macOS may say Apple cannot verify it is free of malware and block the downloaded copy. A valid local signature does not mean Apple has notarized it. If blocked, leave the warning in place and use the source-build instructions below, or wait for a notarized release. Do not remove quarantine or disable Gatekeeper. [Apple explains these alerts](https://support.apple.com/en-us/102445).
+
+## Connect your lights
 
 1. Choose **Connect a Bridge**, then **Find my Bridge** (or enter its address and ID).
 2. Choose **Verify secure connection**. Allow the app’s expected Local Network request if prompted.
@@ -17,18 +27,20 @@ Each Mac pairs separately and stores its own Bridge access key in device-only ma
 
 Use **Disconnect / switch Bridge** in connection setup to select another saved Bridge or pair a new one. Disconnecting retains each Bridge’s key, favorites, and last view, and stays disconnected across relaunch. Selecting a saved Bridge makes no request until you choose **Reconnect**. **Forget this Mac’s saved access** is a separate destructive action.
 
-Demo mode is available before connection; launch with `open "dist/Scene Deck.app" --args --demo` to keep a verification run offline. Favorites are local. Search with **⌘F**, star scenes for the menu bar, click a scene to recall it, and release a brightness slider to commit its room/zone level. Real group power controls are not included in this release.
+Demo mode is available before connection; launch with `open "dist/Scene Deck.app" --args --demo` to keep a verification run offline. Favorites are local. Search with **⌘F**, star scenes for the menu bar, click a scene to recall it, and release a brightness slider to commit its room/zone level. Use the power button beside a room or zone to turn that group on or off. Recently played keeps the last 20 confirmed scene recalls per Bridge; failed commands are excluded. **⌘1–⌘9** recall the first nine favorites shown in the Scenes menu while Scene Deck is active. Right-click a scene to edit, export, or duplicate it. The editor’s color picker prepares a static scene locally; saving still requires a preview and confirmation. Screen colors are approximate and depend on bulb gamut.
 
 ## Build and test
 
 With Apple Command Line Tools installed:
 
 ```sh
-./scripts/test.sh
-./scripts/test-trust.sh
+git clone https://github.com/movieanimals/scene-deck.git
+cd scene-deck
 ./scripts/build.sh
-open "dist/Scene Deck.app"
+open "dist/Scene Deck.app" --args --demo
 ```
+
+Run `./scripts/test.sh` and `./scripts/test-trust.sh` for the synthetic functional and TLS checks.
 
 No downloaded dependencies, developer account, package installation, or Xcode project generation is needed. Build scripts keep caches under `.build/local`. The trust tests use native macOS Security with network certificate fetching disabled and install no roots. Restricted automation sandboxes may need access to the native trust service.
 
@@ -40,11 +52,11 @@ The supplied Swift package also includes XCTest tests for a full Xcode installat
 - Pairing is one attempt per explicit user action. No key is printed, exported, or included in screenshots. Registration and saved-connection failures fail closed.
 - Setup loads resources read-only. Control is enabled by explicit setup completion. Live updates invalidate/refetch authoritative Bridge state; command receipts never invent active scenes.
 - Existing scenes are primary. **Scene files & editor** supports local import/export and static scene creation/editing with explicit room/light mapping and a final preview. See [scene files](docs/SCENE-FILES.md). Dynamic playback editing, proprietary gallery assets, and iPhone feature parity are outside this version.
-- Real read-only pairing and inventory were verified. Scene/brightness writes were tested using mocks; no physical light changes were made during development verification.
+- Real read-only pairing and inventory were verified. Scene, brightness, and power writes were tested using mocks; no physical light changes were made during development verification.
 
 ## Distribution
 
-The [release checklist](docs/DISTRIBUTION.md) documents Developer ID signing, notarization, and clean-Mac validation needed for a public download. No Apple account changes or public release have been made.
+The [release checklist](docs/DISTRIBUTION.md) tracks Developer ID signing, notarization, and clean-Mac validation still needed for a broadly installable release. This public prerelease is intended for technical beta testers. No Apple account changes or notarization submission have been made.
 
 ## Homepage handoff
 

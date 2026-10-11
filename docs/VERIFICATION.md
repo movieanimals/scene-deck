@@ -1,3 +1,16 @@
+# Beta 0.4.0 verification
+
+- Built on Apple silicon with Swift 5.8.1, the macOS 13.3 SDK, and Command Line Tools.
+- 168 synthetic functional checks pass: 45 core, 40 store, 20 client, 15 pairing, 26 scene files, 8 read recovery, 14 Bridge switching.
+- 16 offline TLS checks pass using native macOS Security. No trust roots installed.
+- Native offline demo launched and captured in `demo-library.png`.
+- Strict signature validation passes for the packaged app. Signature is ad-hoc, not Developer ID; no notarization or Gatekeeper acceptance is claimed.
+- Source/history review found no credentials or household identifiers in tracked files. Screenshots use synthetic demo data.
+- Real Bridge pairing and read-only scene inventory were verified in the earlier preview. No real scene, brightness, power, or scene-definition writes were performed during beta development verification.
+- Public-download Gatekeeper acceptance and a second physical Mac/Bridge remain unverified. See `DISTRIBUTION.md` for the signing and release gaps.
+
+## Earlier verification record
+
 # Verification — 0.3.1
 
 macOS 15.7.7, Apple Swift 5.8.1, Command Line Tools SDK 13.3, arm64.

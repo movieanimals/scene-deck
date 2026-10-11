@@ -52,10 +52,18 @@ actor StubTransport {
             do { try await invalidClient.recall("scene-a"); check(false, "Invalid target receipt accepted") }
             catch { check(true, "Reject missing or mismatched acknowledgment target") }
         }
+        let powerStub = StubTransport([(200, #"{"errors":[],"data":[{"rid":"group-a","rtype":"grouped_light"}]}"#), (200, #"{"errors":[],"data":[{"rid":"other","rtype":"grouped_light"}]}"#)])
+        let powerClient = HueClient(configuration: .init(host: "unit-test.invalid", applicationKey: "synthetic"), access: .control, transport: { try await powerStub.send($0) })
+        try await powerClient.power("group-a", on: false)
+        check(true, "Power accepts matching grouped-light receipt")
+        do { try await powerClient.power("group-a", on: true); check(false, "Mismatched power receipt") }
+        catch { check(error as? HueError == .malformedResponse, "Power rejects receipt for a different group") }
         let never = StubTransport([])
         let readOnly = HueClient(configuration: .init(host: "unit-test.invalid", applicationKey: "synthetic-test-value"), access: .readOnly, transport: { try await never.send($0) })
         do { try await readOnly.recall("scene-a"); check(false, "Read-only recall") }
         catch { check(error as? HueError == .approvalRequired, "Read-only policy blocks recall with injected transport too") }
+        do { try await readOnly.power("group-a", on: false); check(false, "Read-only power") }
+        catch { check(error as? HueError == .approvalRequired, "Read-only policy blocks power before transport") }
         check(await never.requests.isEmpty, "Blocked action never reaches transport")
         check(home.groups.first?.activeSceneID == nil, "Mock recall acknowledgment does not invent observed active state")
         print("\(count) client integration checks passed. All responses are in-memory mocks.")

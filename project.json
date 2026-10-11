@@ -5,15 +5,17 @@
   "category": "Mac app",
   "icon": "assets/scene-deck.png",
   "repository": "https://github.com/movieanimals/scene-deck",
-  "repositoryVisibility": "private",
-  "downloadURL": null,
+  "repositoryVisibility": "public",
+  "downloadURL": "https://github.com/movieanimals/scene-deck/releases/download/v0.4.0-beta.1/Scene-Deck-macOS-arm64.zip",
   "integrationStatus": "Ready for separate homepage editor",
   "launchBehavior": "Link to a real download when published; do not embed the native app.",
-  "version": "0.3.1",
+  "version": "0.4.0-beta.1",
   "features": [
     "Scene library and favorites",
     "Menu bar controls",
     "Portable scene files and static editor",
     "Explicit reconnect after sleep"
-  ]
+  ],
+  "releaseNotesURL": "https://github.com/movieanimals/scene-deck/releases/tag/v0.4.0-beta.1",
+  "distributionWarning": "Technical beta; ad-hoc signed, not notarized. macOS may block downloaded copies."
 }
