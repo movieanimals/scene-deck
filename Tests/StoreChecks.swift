@@ -26,6 +26,8 @@ import HueCore
         check(store.groups.map(\.id) == ["living"], "Room filter")
         store.selection = "all"; store.search = "BLUE HOUR"
         check(store.groups.count == 4 && store.scenes(in: "living").count == 1, "Case insensitive search")
+        check(SceneStore.sceneCountLabel(store.scenes(in: "living").count) == "1 scene", "Single filtered scene uses singular count")
+        check(SceneStore.sceneCountLabel(0) == "0 scenes" && SceneStore.sceneCountLabel(2) == "2 scenes", "Zero and multiple scene counts use plural")
         store.search = "no such scene"
         check(store.groups.isEmpty, "Search empty state")
         store.search = "Studio"

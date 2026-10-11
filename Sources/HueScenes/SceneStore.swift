@@ -3,6 +3,7 @@ import HueCore
 import Combine
 
 @MainActor final class SceneStore: ObservableObject {
+    static func sceneCountLabel(_ count: Int) -> String { "\(count) \(count == 1 ? "scene" : "scenes")" }
     @Published var home = DemoHome.make()
     @Published var selection = "all" { didSet { if isLive && !activeBridgeID.isEmpty { defaults.set(selection, forKey: "selectedView-" + activeBridgeID) } } }
     @Published var search = ""

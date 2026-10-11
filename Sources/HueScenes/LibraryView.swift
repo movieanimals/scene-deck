@@ -85,7 +85,7 @@ struct LibraryView: View {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 7) {
                     Text(store.title).font(.system(size: 30, weight: .semibold, design: .rounded))
-                    Text(store.isLive ? "Saved on your Hue Bridge · \(store.home.scenes.count) scenes" : "Find the light for your moment.")
+                    Text(store.isLive ? "Saved on your Hue Bridge · \(SceneStore.sceneCountLabel(store.home.scenes.count))" : "Find the light for your moment.")
                         .font(.system(size: 13)).foregroundColor(Theme.muted)
                 }
                 Spacer(minLength: 20)
@@ -155,7 +155,7 @@ struct GroupHeader: View {
             Image(systemName: group.icon).foregroundColor(Theme.muted).font(.system(size: 19))
             VStack(alignment: .leading, spacing: 4) {
                 Text(group.name).font(.system(size: 18, weight: .semibold))
-                Text("\(store.scenes(in: group.id).count) scenes · " + (group.isOn == false ? "Lights off" : group.activeSceneID.flatMap { id in store.home.scenes.first { $0.id == id }?.name } ?? "Custom lighting")).font(.system(size: 11)).foregroundColor(Theme.muted)
+                Text(SceneStore.sceneCountLabel(store.scenes(in: group.id).count) + " · " + (group.isOn == false ? "Lights off" : group.activeSceneID.flatMap { id in store.home.scenes.first { $0.id == id }?.name } ?? "Custom lighting")).font(.system(size: 11)).foregroundColor(Theme.muted)
             }
             Spacer(minLength: 16)
             if let level = group.brightness {
