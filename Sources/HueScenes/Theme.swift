@@ -46,13 +46,13 @@ struct RefreshScenesButton: View {
     var compact = false
     var body: some View {
         Button {
-            if store.bridgeAuthorizationRequired { Task { await store.restoreConnection() } }
+            if store.needsConnectionRecovery { Task { await store.restoreConnection() } }
             else { store.refreshScenes() }
         } label: {
-            Label(store.bridgeAuthorizationRequired ? "Reconnect" : store.refreshing ? "Refreshing…" : "Refresh scenes", systemImage: "arrow.clockwise")
+            Label(store.needsConnectionRecovery ? (store.reconnecting ? "Retry now" : "Reconnect") : store.refreshing ? "Refreshing…" : "Refresh scenes", systemImage: "arrow.clockwise")
                 .labelStyle(.titleAndIcon)
                 .font(.system(size: compact ? 11 : 12, weight: .medium))
-        }.disabled(store.bridgeAuthorizationRequired ? store.connection.busy || store.sending : !store.canRefresh)
-            .help(store.bridgeAuthorizationRequired ? "Check this Mac’s saved Bridge access" : store.pausedAfterSleep ? "Choose Reconnect after sleep" : "Reload scenes saved on the Bridge (⌘R)")
+        }.disabled(store.needsConnectionRecovery ? !store.canRetryConnection : !store.canRefresh)
+            .help(store.needsConnectionRecovery ? "Retry using this Mac’s saved access; no pairing or light changes" : "Reload scenes saved on the Bridge (⌘R)")
     }
 }

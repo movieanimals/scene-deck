@@ -9,11 +9,10 @@ struct MenuView: View {
             Group {
             HStack { Text("Scene Deck").font(.system(size: 17, weight: .semibold, design: .rounded)); Spacer(); Text(store.isLive ? (store.controlsEnabled ? "HUE" : "SETUP") : "DEMO").font(.system(size: 9, weight: .bold)).foregroundColor(Theme.accent) }
             Text("Your favorites, within reach.").font(.system(size: 11)).foregroundColor(Theme.muted)
-            if store.pausedAfterSleep {
-                Text("Paused after sleep").font(.callout).foregroundColor(Theme.muted)
-                Button("Reconnect") { Task { await store.restoreConnection() } }.disabled(store.connection.busy)
+            if store.pausedAfterSleep || store.reconnecting {
+                Text(store.notice).font(.callout).foregroundColor(Theme.muted)
             }
-            if store.isLive { RefreshScenesButton(compact: true) }
+            if store.isLive || store.needsConnectionRecovery { RefreshScenesButton(compact: true) }
             if store.bridgeUnavailable { Text("Bridge unavailable · showing saved view").font(.caption).foregroundColor(Theme.muted) }
             }
             Divider()

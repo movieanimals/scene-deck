@@ -18,7 +18,7 @@ import SwiftUI
         defaults.set(true, forKey: "connectionDisconnected")
         var loads: [String] = [], saves = 0, removals = 0, methods: [String] = []
         var identityMatches = true, listening = 0
-        let services = BridgeConnection.Services(loadKey: { loads.append($0); return keys[$0] }, saveKey: { _, _ in saves += 1 }, removeKey: { _ in removals += 1 }, makeClient: { host, key, id, access in
+        let services = BridgeConnection.Services(loadKey: { loads.append($0); return keys[$0] }, loadKeySilently: { loads.append($0); return keys[$0] }, saveKey: { _, _ in saves += 1 }, removeKey: { _ in removals += 1 }, makeClient: { host, key, id, access in
             identityMatches = identityMatches && hosts[id] == host && keys[id] == key
             let payload = """
             {"errors":[],"data":[
@@ -42,7 +42,7 @@ import SwiftUI
         store.selection = a + "-room"; store.favorite(store.home.scenes[0])
         store.pauseForSleep()
         check(store.pausedAfterSleep && !store.controlsEnabled && defaults.bool(forKey: "pausedAfterSleep-" + a), "Household A sleep pause persists and disables controls")
-        store.disconnectForSwitch()
+        store.disconnectForSwitch(); store.resumeAfterWake()
         for _ in 0..<100 where listening > 0 { try await Task.sleep(nanoseconds: 1_000_000) }
         check(!store.isLive && !store.connection.paired && !store.controlsEnabled && store.activeBridgeID.isEmpty && listening == 0, "Switch action closes old streams and enables endpoint selection")
         check(store.selection == "all" && !store.favorites.contains(a + "-scene"), "Disconnected demo exposes no prior household favorites or selection")
@@ -59,7 +59,7 @@ import SwiftUI
         check(relaunched.pausedAfterSleep && !relaunched.isLive && loads.count == loadCount, "Selecting paused A and relaunching never reconnects automatically")
         await store.restoreConnection()
         check(store.activeBridgeID == a && store.selection == a + "-room" && store.favorites == [a + "-scene"], "A to B to A restores A's own selection and favorites")
-        check(!store.pausedAfterSleep && !defaults.bool(forKey: "pausedAfterSleep-" + a), "Only explicit reconnect clears selected household sleep pause")
+        check(!store.pausedAfterSleep && !defaults.bool(forKey: "pausedAfterSleep-" + a), "Explicit reconnect clears selected household sleep pause")
         check(defaults.string(forKey: "selectedView-" + b) == "favorites" && defaults.stringArray(forKey: "bridgeFavoriteIDs-" + b) == [b + "-scene"], "Returning to A preserves B's independent preferences")
         store.disconnectForSwitch()
         let beforeRelaunch = loads.count

@@ -24,3 +24,6 @@ xcrun swiftc "${FLAGS[@]}" -parse-as-library -I "$BUILD" -L "$BUILD" -lHueCore S
 
 xcrun swiftc "${FLAGS[@]}" -parse-as-library -I "$BUILD" -L "$BUILD" -lHueCore Sources/HueScenes/SceneStore.swift Sources/HueScenes/BridgeSynchronizer.swift Sources/HueScenes/BridgeConnection.swift Tests/RefreshChecks.swift -o "$BUILD/RefreshChecks" -Xlinker -rpath -Xlinker @executable_path
 "$BUILD/RefreshChecks"
+
+xcrun swiftc "${FLAGS[@]}" -parse-as-library -I "$BUILD" -L "$BUILD" -lHueCore Sources/HueScenes/SceneStore.swift Sources/HueScenes/BridgeSynchronizer.swift Sources/HueScenes/BridgeConnection.swift Tests/WakeChecks.swift -o "$BUILD/WakeChecks" -Xlinker -rpath -Xlinker @executable_path
+"$BUILD/WakeChecks"

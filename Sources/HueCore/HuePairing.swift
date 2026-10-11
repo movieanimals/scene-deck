@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import LocalAuthentication
 
 public struct HueTrustConfiguration {
     public let host: String
@@ -87,9 +88,13 @@ public enum BridgeKeychain {
     private static func query(_ bridgeID: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: bridgeID.lowercased(), kSecAttrSynchronizable as String: false]
     }
-    public static func load(bridgeID: String) throws -> String? {
+    public static func load(bridgeID: String, allowInteraction: Bool = true) throws -> String? {
         var query = query(bridgeID)
         query[kSecReturnData as String] = true; query[kSecMatchLimit as String] = kSecMatchLimitOne
+        if !allowInteraction {
+            let context = LAContext(); context.interactionNotAllowed = true
+            query[kSecUseAuthenticationContext as String] = context
+        }
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         if status == errSecItemNotFound { return nil }

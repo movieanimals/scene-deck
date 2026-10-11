@@ -1,15 +1,24 @@
 import SwiftUI
 import HueCore
+import Security
 
 @MainActor final class BridgeConnection: ObservableObject {
     struct Services {
         var loadKey: (String) throws -> String? = { try BridgeKeychain.load(bridgeID: $0) }
+        var loadKeySilently: (String) throws -> String? = { try BridgeKeychain.load(bridgeID: $0, allowInteraction: false) }
         var saveKey: (String, String) throws -> Void = { try BridgeKeychain.save($0, bridgeID: $1) }
         var removeKey: (String) throws -> Void = { try BridgeKeychain.remove(bridgeID: $0) }
         var makeClient: (String, String, String, BridgeAccess) -> HueClient = { host, key, bridgeID, access in
             HueClient(configuration: .init(host: host, applicationKey: key), access: access, trust: .init(host: host, bridgeID: bridgeID))
         }
     }
+    enum RestoreFailure { case retryable, attention, cancelled }
+    private(set) var restoreFailure: RestoreFailure?
+    private(set) var restoring = false
+    private var restoreGeneration = 0
+    private var lastRestoreDiscovery = Date.distantPast
+    var automaticReconnectBlocked: Bool { defaults.bool(forKey: "automaticReconnectBlocked-" + bridgeID) }
+    func requireExplicitRecovery() { defaults.set(true, forKey: "automaticReconnectBlocked-" + bridgeID) }
     @Published var host = ""
     @Published var bridgeID = ""
     @Published private(set) var busy = false
@@ -29,7 +38,7 @@ import HueCore
     }
     /// Keeps all per-Bridge keys and preferences. Selecting the next endpoint makes no request.
     func disconnectForSwitch() -> Bool {
-        guard !busy, pendingKey == nil else { return false }
+        guard (!busy || restoring), pendingKey == nil else { return false }
         pauseForSleep(); paired = false; verifiedEndpoint = nil; discovered = []
         defaults.set(true, forKey: "connectionDisconnected")
         message = "Disconnected. Choose a saved Bridge, find another, or enter its details. Saved access and preferences are kept."
@@ -56,6 +65,7 @@ import HueCore
     private var pendingInventory: HueClient?
     private var discoverySession: URLSession?
     func pauseForSleep() {
+        restoreGeneration += 1
         suspendedForSleep = true; verified = false
         if let pendingRead { Task { await pendingRead.close() } }
         if let pendingService { Task { await pendingService.close() } }
@@ -83,35 +93,75 @@ import HueCore
     }
     var hasSavedEndpoint: Bool { !host.isEmpty && !bridgeID.isEmpty }
     var setupCompleted: Bool { defaults.bool(forKey: "setupComplete-" + bridgeID) }
-    func completeSetup() throws -> HueClient {
-        guard paired, let key = try services.loadKey(bridgeID) else { throw HueError.approvalRequired }
+    func completeSetup(allowInteraction: Bool = true) throws -> HueClient {
+        guard paired, let key = try (allowInteraction ? services.loadKey : services.loadKeySilently)(bridgeID) else { throw HueError.approvalRequired }
         defaults.set(true, forKey: "setupComplete-" + bridgeID)
         return services.makeClient(host, key, bridgeID, .control)
     }
-    /// Restore never registers a new application if this Mac has no key.
-    func restore() async -> (HomeSnapshot, HueClient)? {
-        guard !busy, hasSavedEndpoint else { return nil }
-        suspendedForSleep = false
-        busy = true; defer { busy = false }
+    /// Restore never registers credentials. Automatic attempts suppress Keychain UI.
+    func restore(allowInteraction: Bool = true) async -> (HomeSnapshot, HueClient)? {
+        guard !busy, hasSavedEndpoint else { restoreFailure = .retryable; return nil }
+        suspendedForSleep = false; restoreFailure = nil
+        let generation = restoreGeneration
+        busy = true; restoring = true
+        defer { busy = false; restoring = false }
         do {
-            guard let key = try services.loadKey(bridgeID) else { message = "This Mac needs its own pairing. Verify the Bridge, then press its button."; return nil }
-            guard !suspendedForSleep else { throw CancellationError() }
+            let key: String
+            do {
+                guard let saved = try (allowInteraction ? services.loadKey : services.loadKeySilently)(bridgeID) else {
+                    restoreFailure = .attention; requireExplicitRecovery()
+                    message = "Saved access is missing. Open Bridge settings to pair when ready."
+                    return nil
+                }
+                key = saved
+            } catch PairingError.keychain(let status) where !allowInteraction && (status == errSecInteractionNotAllowed || status == errSecNotAvailable) {
+                restoreFailure = .retryable
+                message = "Waiting for saved access to become available. Unlock your Mac or choose Reconnect."
+                return nil
+            } catch {
+                restoreFailure = .attention; requireExplicitRecovery()
+                message = "Saved access needs attention. Choose Reconnect to check Keychain access."
+                return nil
+            }
+            try Task.checkCancellation()
+            guard !suspendedForSleep, generation == restoreGeneration else { throw CancellationError() }
             let client = services.makeClient(host, key, bridgeID, .readOnly)
-            let recovery = HueReadConnection(client: client, bridgeID: bridgeID, host: host, addressChanged: { _ in })
+            let recovery = HueReadConnection(client: client, bridgeID: bridgeID, host: host, addressChanged: { _ in }, lastDiscovery: lastRestoreDiscovery)
             pendingRead = recovery
             defer { pendingRead = nil }
             do {
                 let snapshot = HomeSnapshot.project(try await recovery.resources())
-                guard !suspendedForSleep else { await recovery.close(); throw CancellationError() }
                 let resolved = await recovery.currentEndpoint()
+                lastRestoreDiscovery = await recovery.lastDiscoveryDate()
+                try Task.checkCancellation()
+                guard !suspendedForSleep, generation == restoreGeneration else { throw CancellationError() }
                 host = resolved.host
                 paired = true; verified = true; verifiedEndpoint = endpoint
                 defaults.set(false, forKey: "connectionDisconnected")
+                defaults.set(false, forKey: "automaticReconnectBlocked-" + bridgeID)
                 rememberEndpoint()
                 message = "Connected. \(snapshot.scenes.count) scenes. Access is stored on this Mac."
                 return (snapshot, resolved.client)
-            } catch { await recovery.close(); throw error }
-        } catch { message = "Could not reconnect. Check Bridge address, Local Network permission, and Keychain access."; return nil }
+            } catch {
+                lastRestoreDiscovery = await recovery.lastDiscoveryDate()
+                await recovery.close(); throw error
+            }
+        } catch {
+            guard !Task.isCancelled, !suspendedForSleep, generation == restoreGeneration else { restoreFailure = .cancelled; return nil }
+            if error is CancellationError { restoreFailure = .cancelled; return nil }
+            let transientNetwork: Set<URLError.Code> = [.timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .dnsLookupFailed]
+            let transient: Bool
+            if let network = error as? URLError { transient = transientNetwork.contains(network.code) }
+            else if case HueError.http(let status) = error { transient = status >= 500 || status == 408 || status == 429 }
+            else { transient = false }
+            restoreFailure = transient ? .retryable : .attention
+            if transient { message = "Bridge unavailable. Check the local network or try again shortly." }
+            else {
+                requireExplicitRecovery()
+                message = "Saved access or the secure Bridge connection needs attention. Choose Reconnect or open Bridge settings."
+            }
+            return nil
+        }
     }
     func discover() async {
         guard !busy, !paired, pendingKey == nil else { return }

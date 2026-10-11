@@ -25,6 +25,9 @@ import Foundation
         let throttled = HueReadConnection(client: client(URLError(.timedOut)), bridgeID: "missing-household", host: "192.0.2.1", discover: { throttledDiscoveries += 1; return entries }, relocate: { _, _, _ in client() })
         for _ in 0..<3 { _ = try? await throttled.resources() }
         check(throttledDiscoveries == 1, "Failed discovery is throttled for thirty seconds")
+        let discoveryOutage = HueReadConnection(client: client(URLError(.notConnectedToInternet)), bridgeID: "expected-household", host: "192.0.2.1", discover: { throw HueError.http(503) }, relocate: { _, _, _ in client() })
+        do { _ = try await discoveryOutage.resources(); check(false, "discovery outage") }
+        catch { check((error as? URLError)?.code == .notConnectedToInternet, "Optional discovery outage preserves retryable LAN failure") }
         var unsafeAddress = false
         let badTrust = HueReadConnection(client: client(URLError(.cannotConnectToHost)), bridgeID: "expected-household", host: "192.0.2.1", discover: { entries }, relocate: { _, _, _ in client(URLError(.serverCertificateUntrusted)) }, addressChanged: { _ in unsafeAddress = true })
         do { _ = try await badTrust.resources(); check(false, "trust") } catch { check(!unsafeAddress, "Failed candidate TLS cannot replace saved address") }

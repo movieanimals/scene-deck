@@ -11,7 +11,7 @@ struct LibraryView: View {
             VStack(spacing: 0) {
                 header
                 Divider().overlay(Theme.surface)
-                if store.pausedAfterSleep { HStack { Label("Paused after sleep", systemImage: "pause.circle"); Spacer(); Button("Reconnect") { Task { await store.restoreConnection() } } }.padding().background(Theme.surface) }
+                if store.pausedAfterSleep { HStack { Label(store.notice, systemImage: store.reconnecting ? "arrow.clockwise" : "pause.circle"); Spacer(); RefreshScenesButton(compact: true) }.padding().background(Theme.surface) }
                 if store.bridgeUnavailable && !store.pausedAfterSleep {
                     HStack(spacing: 10) { Image(systemName: "wifi.exclamationmark"); Text(store.bridgeAuthorizationRequired ? "Bridge access needs attention. Reconnect to check saved access." : "Can’t refresh the Bridge. Showing the last available scenes."); Spacer(); RefreshScenesButton(compact: true) }
                         .font(.callout).foregroundColor(Theme.ink).padding(14).background(Theme.surface)
@@ -99,7 +99,7 @@ struct LibraryView: View {
                     Button("Reconnect") { Task { await store.restoreConnection() } }.disabled(store.sending || store.connection.busy)
                     Button("Bridge settings…") { store.showConnection = true }
                 } label: {
-                    Label(store.pausedAfterSleep ? "Paused" : store.isLive ? (store.bridgeUnavailable ? "Bridge unavailable" : "Hue Bridge") : "Demo home", systemImage: store.pausedAfterSleep ? "pause.circle" : store.bridgeUnavailable ? "wifi.exclamationmark" : "circle.dotted")
+                    Label(store.bridgeAuthorizationRequired ? "Connection needs attention" : store.reconnecting ? "Reconnecting…" : store.pausedAfterSleep ? "Waiting for Bridge" : store.isLive ? (store.bridgeUnavailable ? "Bridge unavailable" : "Hue Bridge") : "Demo home", systemImage: store.pausedAfterSleep ? "pause.circle" : store.bridgeUnavailable ? "wifi.exclamationmark" : "circle.dotted")
                         .font(.system(size: 12, weight: .medium))
                 }.menuStyle(.borderlessButton).fixedSize().foregroundColor(Theme.accent)
             }
@@ -111,7 +111,7 @@ struct LibraryView: View {
                     Text("⌘F").foregroundColor(Theme.muted).font(.system(size: 11))
                 }.padding(11).background(Theme.surface).cornerRadius(9).overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.line)).frame(maxWidth: 350)
                 Spacer(minLength: 0)
-                if store.isLive { RefreshScenesButton() }
+                if store.isLive || store.needsConnectionRecovery { RefreshScenesButton() }
                 Button { store.edit() } label: { Label("Scene editor", systemImage: "slider.horizontal.3") }
                     .disabled(store.home.resources.isEmpty || store.pausedAfterSleep).help("Create, edit, duplicate, import, or export a scene")
             }.controlSize(.regular)
@@ -125,7 +125,7 @@ struct LibraryView: View {
             if store.bridgeUnavailable { RefreshScenesButton() }
             else if !store.search.isEmpty { Button("Clear search") { store.search = "" } }
             else if ["favorites", "recent"].contains(store.selection) { Button("Browse all scenes") { store.selection = "all" } }
-            else if store.isLive { RefreshScenesButton() }
+            else if store.isLive || store.needsConnectionRecovery { RefreshScenesButton() }
         }.frame(maxWidth: .infinity).padding(.vertical, 80)
     }
     private var emptyTitle: String {
@@ -137,7 +137,7 @@ struct LibraryView: View {
         return store.refreshing ? "Loading your scenes…" : "No saved scenes here yet"
     }
     private var emptyMessage: String {
-        if store.bridgeAuthorizationRequired { return "The Bridge rejected this Mac’s access. Choose Reconnect to check it, then follow Bridge settings if new pairing is needed." }
+        if store.bridgeAuthorizationRequired { return "Saved access or the secure connection needs attention. Choose Reconnect to check it, then follow Bridge settings if needed." }
         if store.bridgeUnavailable { return "Check the Bridge and your local network. Your saved connection is kept; there’s no need to pair again." }
         if !store.search.isEmpty { return "Try a scene’s name, or clear your search to see everything in this view." }
         if store.selection == "favorites" { return "Star a scene to keep it here and in your menu bar." }

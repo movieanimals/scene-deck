@@ -5,7 +5,7 @@
 - **Scene library:** browse by room or zone, search by name, star favorites, and revisit recently played scenes.
 - **Quick lighting controls:** activate scenes, adjust room/zone brightness, or turn a group on and off. Use ⌘1–⌘9 for favorites while the app is active.
 - **Scene editor:** create, duplicate, and edit supported static scenes with a color picker, brightness, and warmth controls. Import/export local Scene Deck JSON files and review changes before saving to the Bridge.
-- **Bridge updates:** the library refreshes when lighting changes. Switch between saved Bridges; after your Mac sleeps, choose Reconnect to resume.
+- **Bridge updates:** the library refreshes when lighting changes. Switch between saved Bridges and keep each household's preferences separate.
 - **Offline demo:** try the interface with sample rooms and scenes before connecting any lights.
 
 For real lights, your Mac must reach your Hue Bridge on the local network. Each Mac pairs with the Bridge’s physical button and keeps its own access key in macOS Keychain. No Apple Home setup is required. Scene Deck is an independent app, unaffiliated with Philips Hue or Signify.
@@ -43,6 +43,8 @@ These steps apply to the **unverified-developer/notarization warning only**. If 
 4. Review your loaded scenes, then choose **Finish setup & enable controls**. This enables your own scene clicks and brightness adjustments; completing setup itself changes no lights.
 
 Each Mac pairs separately and stores its own Bridge access key in device-only macOS Keychain. The app package contains no credentials, private Bridge configuration, or scene inventory. A MacBook must pair for itself. Saved connections restore on launch after setup is complete, except when paused after sleep. Sleep closes active sessions and persists a pause across relaunches; wake never reconnects automatically. Choose **Reconnect** when ready. A rebuilt ad-hoc-signed app may require renewed Keychain access.
+
+The preceding sleep behavior describes the **published 0.4.0 beta**. The [unreleased 0.4.2 source checkpoint](docs/checkpoints/wake-recovery.md) reconnects silently after wake using saved access, with bounded retries and explicit Disconnect respected. It has not replaced the download above.
 
 Use **Disconnect / switch Bridge** in connection setup to select another saved Bridge or pair a new one. Disconnecting retains each Bridge’s key, favorites, and last view, and stays disconnected across relaunch. Selecting a saved Bridge makes no request until you choose **Reconnect**. **Forget this Mac’s saved access** is a separate destructive action.
 

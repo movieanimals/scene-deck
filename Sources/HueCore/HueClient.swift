@@ -3,6 +3,12 @@ import Security
 
 public enum HueError: Error, Equatable, LocalizedError {
     case approvalRequired, invalidHost, invalidResource, invalidBrightness, invalidCredential, http(Int), api(String), malformedResponse
+    public var requiresAccessRecovery: Bool {
+        switch self {
+        case .http(401), .http(403), .invalidCredential, .api: return true
+        default: return false
+        }
+    }
     public var errorDescription: String? {
         switch self {
         case .approvalRequired: return "Bridge access requires explicit approval. Demo mode remains available."

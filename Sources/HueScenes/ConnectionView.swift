@@ -55,8 +55,8 @@ struct ConnectionView: View {
             }
             if connection.hasSavedEndpoint {
                 Button("Reconnect") { Task { await store.restoreConnection() } }.disabled(connection.busy || connection.hasPendingSave || store.sending)
-                if connection.paired || store.isLive {
-                    Button("Disconnect / switch Bridge") { store.disconnectForSwitch() }.disabled(connection.busy || connection.hasPendingSave || store.sending)
+                if connection.paired || store.isLive || connection.setupCompleted {
+                    Button("Disconnect / switch Bridge") { store.disconnectForSwitch() }.disabled((connection.busy && !connection.restoring) || connection.hasPendingSave || store.sending)
                     Text("Disconnecting keeps this Mac’s saved keys and each Bridge’s preferences.").font(.caption).foregroundColor(Theme.muted)
                 }
                 Button("Forget this Mac’s saved access…", role: .destructive) { confirmRemove = true }.disabled(connection.busy || connection.hasPendingSave || store.sending)

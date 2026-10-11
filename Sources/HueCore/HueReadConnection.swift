@@ -13,8 +13,8 @@ public actor HueReadConnection {
     private let discover: () async throws -> [Entry]
     private let relocate: (HueClient, String, String) -> HueClient
     private let now: () -> Date
-    public init(client: HueClient, bridgeID: String, host: String, addressChanged: @escaping (String) -> Void) {
-        self.client = client; self.bridgeID = bridgeID.lowercased(); self.host = host; self.addressChanged = addressChanged
+    public init(client: HueClient, bridgeID: String, host: String, addressChanged: @escaping (String) -> Void, lastDiscovery: Date = .distantPast) {
+        self.client = client; self.bridgeID = bridgeID.lowercased(); self.host = host; self.addressChanged = addressChanged; self.lastDiscovery = lastDiscovery
         discover = Self.discoverBridges; relocate = { $0.readOnlyCopy(host: $1, bridgeID: $2) }; now = Date.init
     }
     internal init(client: HueClient, bridgeID: String, host: String, discover: @escaping () async throws -> [Entry], relocate: @escaping (HueClient, String, String) -> HueClient, now: @escaping () -> Date = Date.init, addressChanged: @escaping (String) -> Void = { _ in }) {
@@ -37,7 +37,10 @@ public actor HueReadConnection {
             let retryable: Set<URLError.Code> = [.timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet]
             guard let network, retryable.contains(network.code), now().timeIntervalSince(lastDiscovery) >= 30 else { throw error }
             lastDiscovery = now()
-            let entries = try await discover()
+            let originalError = error
+            let entries: [Entry]
+            do { entries = try await discover() }
+            catch { try checkOpen(); throw originalError } // Optional discovery must not turn a LAN outage into an access failure.
             try checkOpen()
             guard let match = entries.first(where: { $0.id.lowercased() == bridgeID }), match.internalipaddress != host else { throw error }
             let proposed = relocate(client, match.internalipaddress, bridgeID)
@@ -51,6 +54,7 @@ public actor HueReadConnection {
             } catch { proposed.close(); candidate = nil; throw error }
         }
     }
+    public func lastDiscoveryDate() -> Date { lastDiscovery }
     public func currentEndpoint() -> (client: HueClient, host: String) { (client, host) }
     public func listen(onChange: @escaping () async -> Void) async throws { try checkOpen(); try await client.listen(onChange: onChange) }
     public func close() { closed = true; client.close(); candidate?.close(); candidate = nil }

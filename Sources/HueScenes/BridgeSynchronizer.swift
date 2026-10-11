@@ -57,7 +57,7 @@ import HueCore
                         self?.enqueueRefresh(debounce: true)
                     }
                 } catch is CancellationError { break }
-                catch HueError.http(let code) where code == 401 || code == 403 {
+                catch let error as HueError where error.requiresAccessRecovery {
                     if self?.generation == token { self?.revokeAccess() }
                     break
                 } catch { }
@@ -116,7 +116,7 @@ import HueCore
                         self?.lastUpdated = now(); self?.unavailable = false
                         self?.status = "Up to date"; retryDelay = retry
                     } catch is CancellationError { throw CancellationError() }
-                    catch HueError.http(let code) where code == 401 || code == 403 {
+                    catch let error as HueError where error.requiresAccessRecovery {
                         if self?.generation == token { self?.revokeAccess() }; return
                     } catch {
                         guard !Task.isCancelled, self?.generation == token else { return }
@@ -133,9 +133,9 @@ import HueCore
     }
     private func revokeAccess() {
         stop(); close(); authorizationRequired = true; unavailable = true
-        status = "Bridge access was revoked. Reconnect explicitly to recover."
+        status = "Bridge access needs attention. Choose Reconnect to check saved access."
     }
-    func pauseForSleep() { stop(); close(); paused = true; status = "Paused after sleep. Choose Reconnect when ready." }
+    func pauseForSleep() { stop(); close(); paused = true; status = "Mac sleeping. Reconnecting automatically after wake." }
     func stop() {
         generation += 1; running = false
         task?.cancel(); task = nil

@@ -162,11 +162,11 @@ import HueCore
         store.pauseForSleep()
         let commandCount = recalls.count + levels.count
         store.activate(store.home.scenes[0]); store.brightness(store.home.groups[0], 80)
-        check(store.pausedAfterSleep && !store.controlsEnabled && store.controlsDisabled && recalls.count + levels.count == commandCount, "Sleep disables all commands until explicit reconnect")
+        check(store.pausedAfterSleep && !store.controlsEnabled && store.controlsDisabled && recalls.count + levels.count == commandCount, "Sleep disables all commands until a fresh connection is ready")
         defaults.set(store.connection.bridgeID, forKey: "bridgeID"); defaults.set(store.connection.host, forKey: "bridgeHost")
         defaults.set(true, forKey: "setupComplete-" + store.connection.bridgeID)
-        let afterSleep = SceneStore(defaults: defaults)
-        check(afterSleep.pausedAfterSleep && !afterSleep.isLive && !afterSleep.connection.busy, "Pause persists across app relaunch without Keychain or connection attempts")
+        let afterSleep = SceneStore(defaults: defaults, connectionServices: .init(loadKeySilently: { _ in nil }))
+        check(afterSleep.pausedAfterSleep && !afterSleep.isLive && !afterSleep.connection.busy, "Relaunch starts with controls paused pending saved-access recovery")
         print("\(count) store checks passed. No network requests made.")
     }
 }

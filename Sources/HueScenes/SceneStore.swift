@@ -30,13 +30,23 @@ import Combine
     @Published private(set) var bridgeUnavailable = false
     @Published private(set) var bridgeAuthorizationRequired = false
     @Published private(set) var lastUpdated: Date?
+    @Published private(set) var reconnecting = false
+    private var recoveryTask: Task<Void, Never>?
+    private var recoveryGeneration = 0
+    private var manualRestoreRunning = false
+    private var systemSleeping = false
+    private let recoverySleep: (TimeInterval) async throws -> Void
+    private var wakeSubscription: AnyCancellable?
     private var foregroundSubscription: AnyCancellable?
-    var canRefresh: Bool { isLive && !pausedAfterSleep && !bridgeAuthorizationRequired && !refreshing }
+    var needsConnectionRecovery: Bool { pausedAfterSleep || reconnecting || bridgeAuthorizationRequired || (!isLive && connection.hasSavedEndpoint && connection.setupCompleted) }
+    var canRetryConnection: Bool { !systemSleeping && !connection.busy && !sending }
+    var canRefresh: Bool { isLive && !pausedAfterSleep && !reconnecting && !bridgeAuthorizationRequired && !refreshing }
     func refreshScenes() {
         guard isLive, !pausedAfterSleep else { return }
         synchronizer?.refresh()
     }
     func refreshOnForeground() {
+        if !systemSleeping && (pausedAfterSleep || (!isLive && connection.setupCompleted)) { startAutomaticRecovery(); return }
         guard isLive, !pausedAfterSleep else { return }
         synchronizer?.refreshOnForeground()
     }
@@ -63,15 +73,20 @@ import Combine
     private var synchronizer: BridgeSynchronizer?
     private var subscriptions: Set<AnyCancellable> = []
     private let defaults: UserDefaults
-    init(defaults: UserDefaults = .standard, connectionServices: BridgeConnection.Services = .init()) {
-        self.defaults = defaults
+    init(defaults: UserDefaults = .standard, connectionServices: BridgeConnection.Services = .init(), recoverySleep: @escaping (TimeInterval) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }) {
+        self.defaults = defaults; self.recoverySleep = recoverySleep
         connection = BridgeConnection(defaults: defaults, services: connectionServices)
         showConnection = CommandLine.arguments.contains("--setup") || ((!connection.hasSavedEndpoint || connection.requiresExplicitReconnect) && !CommandLine.arguments.contains("--demo"))
         pausedAfterSleep = !CommandLine.arguments.contains("--demo") && defaults.bool(forKey: "pausedAfterSleep-" + connection.bridgeID)
         favorites = Set(defaults.stringArray(forKey: "demoFavoriteIDs") ?? ["living-0", "living-2", "bedroom-1", "studio-4"])
         recentIDs = defaults.stringArray(forKey: "demoRecentSceneIDs") ?? []
         sleepSubscription = NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification).sink { [weak self] _ in Task { @MainActor in self?.pauseForSleep() } }
+        wakeSubscription = NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification).sink { [weak self] _ in Task { @MainActor in self?.resumeAfterWake() } }
         foregroundSubscription = NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification).sink { [weak self] _ in Task { @MainActor in self?.refreshOnForeground() } }
+        if !CommandLine.arguments.contains("--demo"), connection.automaticReconnectBlocked {
+            bridgeAuthorizationRequired = true; bridgeUnavailable = true
+            notice = "Saved Bridge access needs attention. Choose Reconnect or open Bridge settings."
+        }
         // Explicit command-line equivalent of the approved Verify + Pair buttons.
         // Never used by normal launch; reports only non-secret outcome text.
         if CommandLine.arguments.contains("--pair-after-button") {
@@ -88,38 +103,106 @@ import Combine
                 }
             }
         }
-        else if !CommandLine.arguments.contains("--demo") && connection.hasSavedEndpoint && !connection.requiresExplicitReconnect && !pausedAfterSleep && (connection.setupCompleted || CommandLine.arguments.contains("--connect-saved")) {
-            Task { [weak self] in await self?.restoreConnection() }
+        else if !CommandLine.arguments.contains("--demo") && connection.hasSavedEndpoint && !connection.requiresExplicitReconnect && (connection.setupCompleted || CommandLine.arguments.contains("--connect-saved")) {
+            startAutomaticRecovery()
         }
     }
     func pauseForSleep() {
         guard isLive || !CommandLine.arguments.contains("--demo") else { return }
         guard isLive || connection.hasSavedEndpoint else { return }
+        systemSleeping = true; cancelRecovery()
         sessionGeneration += 1; pausedAfterSleep = true
         defaults.set(true, forKey: "pausedAfterSleep-" + connection.bridgeID)
         commandTask?.cancel(); sending = false; synchronizer?.pauseForSleep(); connection.pauseForSleep()
         // Invalidate the session too: editor POST/PUT work must never resume after wake.
         controlClient?.close(); controlClient = nil; readClient?.close(); readClient = nil
         liveRecall = nil; liveBrightness = nil; livePower = nil; liveFetch = nil; controlsEnabled = false
-        notice = "Paused after sleep · Choose Reconnect when ready"
+        notice = "Mac sleeping · Will reconnect automatically after wake"
+    }
+    func resumeAfterWake() {
+        systemSleeping = false
+        guard pausedAfterSleep || !isLive else { synchronizer?.refreshOnForeground(); return }
+        startAutomaticRecovery()
+    }
+    private var canRecoverAutomatically: Bool {
+        !systemSleeping && !CommandLine.arguments.contains("--demo") && connection.hasSavedEndpoint && (connection.setupCompleted || CommandLine.arguments.contains("--connect-saved")) && !connection.requiresExplicitReconnect && !connection.automaticReconnectBlocked && !bridgeAuthorizationRequired
+    }
+    private func cancelRecovery() {
+        recoveryGeneration += 1
+        recoveryTask?.cancel(); recoveryTask = nil; reconnecting = false
+    }
+    private func startAutomaticRecovery() {
+        guard canRecoverAutomatically, recoveryTask == nil, !manualRestoreRunning else { return }
+        let token = recoveryGeneration, sleep = recoverySleep
+        reconnecting = true; bridgeUnavailable = true
+        notice = "Reconnecting to your Bridge…"
+        recoveryTask = Task { [weak self] in
+            var delay: TimeInterval = 1
+            defer {
+                if self?.recoveryGeneration == token { self?.recoveryTask = nil; self?.reconnecting = false }
+            }
+            while !Task.isCancelled, self?.recoveryGeneration == token, self?.canRecoverAutomatically == true {
+                guard let connection = self?.connection else { return }
+                let generation = self?.sessionGeneration
+                let result = await connection.restore(allowInteraction: false)
+                guard !Task.isCancelled, self?.recoveryGeneration == token, self?.sessionGeneration == generation, self?.canRecoverAutomatically == true else {
+                    result?.1.close()
+                    // A failed access check persists the block before returning.
+                    if self?.recoveryGeneration == token, connection.restoreFailure == .attention { self?.showRecoveryAttention() }
+                    return
+                }
+                if let (snapshot, client) = result {
+                    self?.pausedAfterSleep = false
+                    self?.connect(snapshot: snapshot, client: client)
+                    if connection.setupCompleted { self?.finishSetup(allowInteraction: false) }
+                    return
+                }
+                if connection.restoreFailure == .cancelled { return }
+                self?.bridgeUnavailable = true
+                self?.notice = "\(connection.message) Retrying in \(Int(delay)) seconds."
+                do { try await sleep(delay) } catch { return }
+                delay = min(delay * 2, 60)
+            }
+        }
+    }
+    private func showRecoveryAttention() {
+        bridgeAuthorizationRequired = true; bridgeUnavailable = true; controlsEnabled = false
+        notice = connection.message
     }
     func restoreConnection() async {
+        guard !manualRestoreRunning, !systemSleeping else { return }
+        manualRestoreRunning = true
+        defer {
+            manualRestoreRunning = false
+            if pausedAfterSleep && !systemSleeping { startAutomaticRecovery() }
+        }
         let generation = sessionGeneration
+        let previous = recoveryTask
+        cancelRecovery()
+        if previous != nil { connection.pauseForSleep(); await previous?.value }
+        guard !systemSleeping, generation == sessionGeneration else { return }
         if let (snapshot, client) = await connection.restore() {
-            guard generation == sessionGeneration else { client.close(); return }
+            guard !Task.isCancelled, generation == sessionGeneration else { client.close(); return }
             pausedAfterSleep = false
             connect(snapshot: snapshot, client: client)
             if connection.setupCompleted { finishSetup() }
-        } else { notice = connection.message; showConnection = true }
+        } else if generation == sessionGeneration {
+            if connection.restoreFailure == .attention { showRecoveryAttention() }
+            notice = connection.message; showConnection = true
+            // An explicit retry can recover a transient outage automatically afterward.
+        }
     }
-    func finishSetup() {
-        guard !pausedAfterSleep else { notice = "Reconnect explicitly before enabling controls."; return }
+    func finishSetup(allowInteraction: Bool = true) {
+        guard !pausedAfterSleep else { notice = "Waiting for the Bridge connection before enabling controls."; return }
         do {
-            let client = try connection.completeSetup()
+            let client = try connection.completeSetup(allowInteraction: allowInteraction)
             controlClient = client
             enableControls(recall: { try await client.recall($0) }, brightness: { try await client.brightness($0, value: $1) }, power: { try await client.power($0, on: $1) }, fetch: nil)
             showConnection = false
-        } catch { notice = "Could not enable controls. Check this Mac’s Keychain access and reconnect." }
+        } catch {
+            connection.requireExplicitRecovery(); bridgeAuthorizationRequired = true
+            notice = "Saved access needs attention. Choose Reconnect to check Keychain access."
+        }
     }
     // In-memory closures also allow verification without touching real lights.
     func enableControls(recall: @escaping (String) async throws -> Void, brightness: @escaping (String, Double) async throws -> Void, power: ((String, Bool) async throws -> Void)? = nil, fetch: (() async throws -> [HueResource])?) {
@@ -227,10 +310,13 @@ import Combine
         sync.$refreshing.sink { [weak self] in self?.refreshing = $0 }.store(in: &subscriptions)
         sync.$unavailable.sink { [weak self] in self?.bridgeUnavailable = $0 }.store(in: &subscriptions)
         sync.$lastUpdated.sink { [weak self] in self?.lastUpdated = $0 }.store(in: &subscriptions)
-        sync.$status.sink { [weak self] in self?.notice = "Bridge · \($0)" }.store(in: &subscriptions)
+        sync.$status.sink { [weak self] in if self?.bridgeAuthorizationRequired == false { self?.notice = "Bridge · \($0)" } }.store(in: &subscriptions)
         sync.$authorizationRequired.sink { [weak self] required in
             self?.bridgeAuthorizationRequired = required
             guard required else { return }
+            self?.connection.requireExplicitRecovery()
+            self?.notice = "Saved Bridge access needs attention. Choose Reconnect or open Bridge settings."
+            self?.cancelRecovery()
             self?.commandTask?.cancel(); self?.controlClient?.close(); self?.controlClient = nil
             self?.liveRecall = nil; self?.liveBrightness = nil; self?.livePower = nil; self?.controlsEnabled = false
         }.store(in: &subscriptions)
@@ -256,6 +342,7 @@ import Combine
         guard !sending else { return }
         do {
             try connection.removeLocalAccess()
+            cancelRecovery()
             sessionGeneration += 1; commandTask?.cancel(); synchronizer?.stop(); synchronizer = nil; subscriptions.removeAll()
             controlClient?.close(); controlClient = nil; readClient?.close(); readClient = nil
             liveRecall = nil; liveBrightness = nil; livePower = nil; controlsEnabled = false; isLive = false
@@ -267,6 +354,7 @@ import Combine
     }
     func disconnectForSwitch() {
         guard !sending, connection.disconnectForSwitch() else { return }
+        cancelRecovery()
         sessionGeneration += 1; commandTask?.cancel(); commandTask = nil
         subscriptions.removeAll(); synchronizer?.stop(); synchronizer = nil
         controlClient?.close(); controlClient = nil; readClient?.close(); readClient = nil
@@ -278,6 +366,7 @@ import Combine
         recentIDs = defaults.stringArray(forKey: "demoRecentSceneIDs") ?? []
         showSceneEditor = false; showConnection = true; notice = connection.message
     }
+    deinit { recoveryTask?.cancel(); commandTask?.cancel() }
     func reset() { guard !isLive else { return }; home = DemoHome.make(); simulatedOffline = false; notice = "Demo home reset. Favorites kept." }
 }
 
