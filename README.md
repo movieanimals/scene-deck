@@ -1,6 +1,6 @@
 # Scene Deck
 
-Scene Deck is a native Mac app for controlling **Philips Hue lights and scenes through your Hue Bridge**. Browse the scenes already saved on your Bridge, choose one to change a room’s lighting, and keep your favorites one click away in the menu bar.
+**Scene Deck is a native Mac app for Philips Hue.** Control your lights, switch scenes, and organize favorites right from your desktop. A Hue Bridge is required to control real lights.
 
 - **Scene library:** browse by room or zone, search by name, star favorites, and revisit recently played scenes.
 - **Quick lighting controls:** activate scenes, adjust room/zone brightness, or turn a group on and off. Use ⌘1–⌘9 for favorites while the app is active.
@@ -8,7 +8,7 @@ Scene Deck is a native Mac app for controlling **Philips Hue lights and scenes t
 - **Bridge updates:** the library refreshes when lighting changes. Switch between saved Bridges; after your Mac sleeps, choose Reconnect to resume.
 - **Offline demo:** try the interface with sample rooms and scenes before connecting any lights.
 
-For real lights, your Mac must reach your Hue Bridge on the local network. Each Mac pairs with the Bridge’s physical button and keeps its own access key in macOS Keychain. No Apple Home setup is required.
+For real lights, your Mac must reach your Hue Bridge on the local network. Each Mac pairs with the Bridge’s physical button and keeps its own access key in macOS Keychain. No Apple Home setup is required. Scene Deck is an independent app, unaffiliated with Philips Hue or Signify.
 
 ![Offline demo with sample scenes](docs/demo-library.png)
 
