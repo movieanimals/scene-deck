@@ -22,7 +22,18 @@ Requires **macOS 13 or later**, an **Apple silicon Mac** (M1 or newer), and a **
 2. Double-click the ZIP in Finder. Move **Scene Deck.app** to your Applications folder. Quit an older copy before replacing it; avoid launching a second copy from Downloads.
 3. Open **Scene Deck** from Applications. To keep it in the Dock, right-click its Dock icon → **Options → Keep in Dock**.
 
-**Beta signing limitation:** this build is ad-hoc signed, **not Developer ID signed or notarized**. macOS may say Apple cannot verify it is free of malware and block the downloaded copy. A valid local signature does not mean Apple has notarized it. If blocked, leave the warning in place and use the source-build instructions below, or wait for a notarized release. Do not remove quarantine or disable Gatekeeper. [Apple explains these alerts](https://support.apple.com/en-us/102445).
+### If macOS cannot verify the developer
+
+This beta is ad-hoc signed, **not yet Developer ID signed or notarized**. macOS may warn that the developer cannot be verified or that Apple cannot verify the app is free of malware. A valid local signature does not mean Apple has notarized it.
+
+If you downloaded the unmodified app from [this project’s GitHub release](https://github.com/movieanimals/scene-deck/releases/tag/v0.4.0-beta.1), trust that source, and choose to run the beta:
+
+1. Try opening **Scene Deck** from Applications once so macOS records the blocked attempt.
+2. Open **System Settings → Privacy & Security** and scroll to the security section.
+3. Click **Open Anyway** beside the message about **Scene Deck**.
+4. Confirm **Open** and authenticate if asked. This creates an exception for this app.
+
+These steps apply to the **unverified-developer/notarization warning only**. If macOS reports detected malware, says the app will damage your computer, or says it is damaged, stop and report the exact alert instead of overriding it. Do not disable Gatekeeper or strip quarantine attributes. You can also wait for a notarized release. See [Apple’s instructions and explanation of the different alerts](https://support.apple.com/en-lamr/102445).
 
 ## Connect your lights
 
