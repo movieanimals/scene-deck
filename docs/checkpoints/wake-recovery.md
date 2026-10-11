@@ -1,6 +1,6 @@
 # Silent wake recovery checkpoint
 
-Prepared 2026-10-11. **0.4.2 build 7; local, not installed or published.** Includes the singular scene-count fix from `666b9a1`. Installed 0.4.1 (`dd4be2d`) and the public 0.4.0 beta remain unchanged.
+Prepared 2026-10-11. **0.4.2 build 7; source checkpoint, no new public binary release.** Includes the singular scene-count fix from `666b9a1`. The public download remains 0.4.0 beta.
 
 ## Corrected intent
 
@@ -26,9 +26,11 @@ The native implementation uses `NSWorkspace.didWakeNotification` and a single ca
 - All recovery requests in these tests are GETs. No real network, Keychain, or light operations occur.
 - Targeted review found and closed three lifecycle/recovery issues; final review found no remaining material issue.
 - Native app build and strict deep signature verification of a fresh ZIP extraction succeeded using existing Command Line Tools.
-- Installed 0.4.1 executable SHA-256 remains `4039508e9893643628790d003dd36b979c6c91245e6c8a8fd36214529500835b`.
+- Before replacement, the 0.4.1 executable SHA-256 was verified as `4039508e9893643628790d003dd36b979c6c91245e6c8a8fd36214529500835b`; that app is preserved in the backup.
 
-Real Mac sleep/wake, current Bridge recovery, and the new noninteractive Keychain path have not been exercised against the installed app. That acceptance pass follows approval to replace the installed app. The existing 0.4.0 backup and private local settings remain untouched. No public push, tag, or release was made.
+After explicit approval, the exact tested package was installed locally with the previous 0.4.1 app preserved as a recoverable backup. Launch restored the saved Bridge inventory automatically, without clicking Reconnect, re-pairing, or an authentication prompt. One library window, one running instance, and the existing Dock entry were verified. No lights or OS security settings were changed.
+
+Real Mac sleep/wake validation is still pending; the Mac was not forced to sleep while other work was running. The 19 deterministic lifecycle checks cover the wake logic, but do not replace this remaining device acceptance check. Source publication does not publish a new release binary.
 
 ## Artifact
 
