@@ -25,6 +25,24 @@ import Combine
     }
     @Published private(set) var activeBridgeID = ""
     @Published private(set) var pausedAfterSleep = false
+    @Published private(set) var refreshing = false
+    @Published private(set) var bridgeUnavailable = false
+    @Published private(set) var bridgeAuthorizationRequired = false
+    @Published private(set) var lastUpdated: Date?
+    private var foregroundSubscription: AnyCancellable?
+    var canRefresh: Bool { isLive && !pausedAfterSleep && !bridgeAuthorizationRequired && !refreshing }
+    func refreshScenes() {
+        guard isLive, !pausedAfterSleep else { return }
+        synchronizer?.refresh()
+    }
+    func refreshOnForeground() {
+        guard isLive, !pausedAfterSleep else { return }
+        synchronizer?.refreshOnForeground()
+    }
+    func applySnapshot(_ snapshot: HomeSnapshot) {
+        home = snapshot
+        if !["all", "favorites", "recent"].contains(selection), !snapshot.groups.contains(where: { $0.id == selection }) { selection = "all" }
+    }
     private var sleepSubscription: AnyCancellable?
     private var readClient: HueClient?
     private var sessionGeneration = 0
@@ -52,6 +70,7 @@ import Combine
         favorites = Set(defaults.stringArray(forKey: "demoFavoriteIDs") ?? ["living-0", "living-2", "bedroom-1", "studio-4"])
         recentIDs = defaults.stringArray(forKey: "demoRecentSceneIDs") ?? []
         sleepSubscription = NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification).sink { [weak self] _ in Task { @MainActor in self?.pauseForSleep() } }
+        foregroundSubscription = NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification).sink { [weak self] _ in Task { @MainActor in self?.refreshOnForeground() } }
         // Explicit command-line equivalent of the approved Verify + Pair buttons.
         // Never used by normal launch; reports only non-secret outcome text.
         if CommandLine.arguments.contains("--pair-after-button") {
@@ -118,8 +137,12 @@ import Combine
                 guard !Task.isCancelled, self?.sessionGeneration == generation, self?.pausedAfterSleep == false else { return }
                 if let id = recalledSceneID { self?.recordRecall(id) }
                 do {
-                    if let fetch = self?.liveFetch { self?.home = HomeSnapshot.project(try await fetch()) }
-                    else { self?.synchronizer?.start() }
+                    if let fetch = self?.liveFetch {
+                        let snapshot = HomeSnapshot.project(try await fetch())
+                        guard !Task.isCancelled, self?.sessionGeneration == generation, self?.pausedAfterSleep == false else { return }
+                        self?.applySnapshot(snapshot)
+                    }
+                    else { self?.synchronizer?.refresh() }
                     self?.notice = "\(label) · Bridge confirmed"
                 } catch { self?.notice = "Command sent. State refresh failed; waiting for the Bridge." }
             } catch { if self?.sessionGeneration == generation { self?.notice = "The Bridge did not confirm the command. Check the connection and try again." } }
@@ -199,9 +222,14 @@ import Combine
             }
         })
         synchronizer = sync
-        sync.$snapshot.compactMap { $0 }.sink { [weak self] in self?.home = $0 }.store(in: &subscriptions)
+        sync.$snapshot.compactMap { $0 }.sink { [weak self] in self?.applySnapshot($0) }.store(in: &subscriptions)
+        sync.$refreshing.sink { [weak self] in self?.refreshing = $0 }.store(in: &subscriptions)
+        sync.$unavailable.sink { [weak self] in self?.bridgeUnavailable = $0 }.store(in: &subscriptions)
+        sync.$lastUpdated.sink { [weak self] in self?.lastUpdated = $0 }.store(in: &subscriptions)
         sync.$status.sink { [weak self] in self?.notice = "Bridge · \($0)" }.store(in: &subscriptions)
-        sync.$authorizationRequired.filter { $0 }.sink { [weak self] _ in
+        sync.$authorizationRequired.sink { [weak self] required in
+            self?.bridgeAuthorizationRequired = required
+            guard required else { return }
             self?.commandTask?.cancel(); self?.controlClient?.close(); self?.controlClient = nil
             self?.liveRecall = nil; self?.liveBrightness = nil; self?.livePower = nil; self?.controlsEnabled = false
         }.store(in: &subscriptions)
@@ -221,7 +249,7 @@ import Combine
             throw error
         }
         guard generation == sessionGeneration, !pausedAfterSleep else { throw SceneFileError.invalid("Save interrupted. Reconnect and check the scene before trying again.") }
-        synchronizer?.start(); notice = "Scene saved · Library refreshing"
+        synchronizer?.refresh(); notice = "Scene saved · Library refreshing"
     }
     func removeLocalAccess() {
         guard !sending else { return }
@@ -230,6 +258,7 @@ import Combine
             sessionGeneration += 1; commandTask?.cancel(); synchronizer?.stop(); synchronizer = nil; subscriptions.removeAll()
             controlClient?.close(); controlClient = nil; readClient?.close(); readClient = nil
             liveRecall = nil; liveBrightness = nil; livePower = nil; controlsEnabled = false; isLive = false
+            refreshing = false; bridgeUnavailable = false; bridgeAuthorizationRequired = false; lastUpdated = nil
             home = DemoHome.make(); favorites = Set(defaults.stringArray(forKey: "demoFavoriteIDs") ?? [])
             recentIDs = defaults.stringArray(forKey: "demoRecentSceneIDs") ?? []
             notice = connection.message; showConnection = true
@@ -242,6 +271,7 @@ import Combine
         controlClient?.close(); controlClient = nil; readClient?.close(); readClient = nil
         liveRecall = nil; liveBrightness = nil; livePower = nil; liveFetch = nil; controlsEnabled = false
         isLive = false; activeBridgeID = ""; pausedAfterSleep = false
+        refreshing = false; bridgeUnavailable = false; bridgeAuthorizationRequired = false; lastUpdated = nil
         home = DemoHome.make(); selection = "all"; search = ""; simulatedOffline = false
         favorites = Set(defaults.stringArray(forKey: "demoFavoriteIDs") ?? [])
         recentIDs = defaults.stringArray(forKey: "demoRecentSceneIDs") ?? []

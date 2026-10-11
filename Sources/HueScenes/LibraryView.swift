@@ -7,11 +7,15 @@ struct LibraryView: View {
     @FocusState private var searchFocused: Bool
     var body: some View {
         HStack(spacing: 0) {
-            sidebar.frame(width: 216)
+            sidebar.frame(width: 208)
             VStack(spacing: 0) {
                 header
                 Divider().overlay(Theme.surface)
                 if store.pausedAfterSleep { HStack { Label("Paused after sleep", systemImage: "pause.circle"); Spacer(); Button("Reconnect") { Task { await store.restoreConnection() } } }.padding().background(Theme.surface) }
+                if store.bridgeUnavailable && !store.pausedAfterSleep {
+                    HStack(spacing: 10) { Image(systemName: "wifi.exclamationmark"); Text(store.bridgeAuthorizationRequired ? "Bridge access needs attention. Reconnect to check saved access." : "Can’t refresh the Bridge. Showing the last available scenes."); Spacer(); RefreshScenesButton(compact: true) }
+                        .font(.callout).foregroundColor(Theme.ink).padding(14).background(Theme.surface)
+                }
                 if store.simulatedOffline { Label("Demo Bridge offline. Restore the connection to use controls.", systemImage: "wifi.slash").foregroundColor(Theme.accent).font(.callout).padding().frame(maxWidth: .infinity, alignment: .leading).background(Theme.surface) }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 32) {
@@ -27,9 +31,10 @@ struct LibraryView: View {
                     }.padding(28)
                 }
                 HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle").foregroundColor(Theme.accent)
-                    Text(store.notice).lineLimit(1)
+                    Image(systemName: store.pausedAfterSleep ? "pause.circle" : store.bridgeUnavailable ? "wifi.exclamationmark" : "checkmark.circle").foregroundColor(Theme.accent)
+                    Text(store.notice).lineLimit(1).help(store.notice)
                     Spacer()
+                    if store.isLive, let updated = store.lastUpdated { Text("Updated \(updated, style: .time)").font(.system(size: 11)).monospacedDigit() }
                     Text(store.isLive ? (store.controlsEnabled ? "HUE BRIDGE" : "SETUP · READ ONLY") : "LOCAL DEMO").font(.system(size: 10, weight: .semibold)).tracking(1.2)
                 }.font(.system(size: 12)).foregroundColor(Theme.muted).padding(.horizontal, 28).padding(.vertical, 13).background(Theme.sidebar)
             }
@@ -38,7 +43,7 @@ struct LibraryView: View {
             .preferredColorScheme(.dark)
             .sheet(isPresented: $store.showConnection) { ConnectionView(connection: store.connection) }
             .sheet(isPresented: $store.showSceneEditor) { SceneEditorView() }
-            .onAppear { AppDelegate.openLibrary = { openWindow(id: "library") } }
+            .onAppear { AppDelegate.openLibrary = { openWindow(id: "library") }; store.refreshOnForeground() }
             .background(Button("") { searchFocused = true }.keyboardShortcut("f", modifiers: .command).hidden())
     }
     private var sidebar: some View {
@@ -46,7 +51,7 @@ struct LibraryView: View {
             HStack(spacing: 10) {
                 Image(systemName: "circle.hexagongrid.fill").font(.system(size: 25)).foregroundColor(Theme.accent)
                 Text("Scene Deck").font(.system(size: 20, weight: .semibold, design: .rounded))
-            }.padding(.top, 30).padding(.bottom, 34).padding(.horizontal, 20)
+            }.padding(.top, 28).padding(.bottom, 28).padding(.horizontal, 20)
             nav("All scenes", icon: "square.grid.2x2", id: "all", count: store.home.scenes.count)
             nav("Favorites", icon: "star", id: "favorites", count: store.favoriteScenes.count)
             nav("Recently played", icon: "clock", id: "recent", count: store.recentScenes.count)
@@ -76,42 +81,70 @@ struct LibraryView: View {
         }.buttonStyle(.plain).padding(.horizontal, 10).padding(.vertical, 2).accessibilityAddTraits(store.selection == id ? .isSelected : [])
     }
     private var header: some View {
-        VStack(alignment: .leading, spacing: 19) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(store.title).font(.system(size: 32, weight: .semibold, design: .rounded))
-                    Text("A different atmosphere, one click away.").font(.system(size: 13)).foregroundColor(Theme.muted)
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(store.title).font(.system(size: 30, weight: .semibold, design: .rounded))
+                    Text(store.isLive ? "Saved on your Hue Bridge · \(store.home.scenes.count) scenes" : "Find the light for your moment.")
+                        .font(.system(size: 13)).foregroundColor(Theme.muted)
                 }
-                Spacer()
-                Button("Scene files & editor…") { store.edit() }.disabled(store.home.resources.isEmpty || store.pausedAfterSleep)
+                Spacer(minLength: 20)
                 Menu {
                     if !store.isLive {
-                    Button("Simulate a Bridge event") { store.simulateExternalChange() }
-                    Button(store.simulatedOffline ? "Restore demo connection" : "Simulate offline Bridge") { store.simulatedOffline.toggle() }
-                    Button("Reset demo rooms") { store.reset() }
+                        Button("Simulate a Bridge event") { store.simulateExternalChange() }
+                        Button(store.simulatedOffline ? "Restore demo connection" : "Simulate offline Bridge") { store.simulatedOffline.toggle() }
+                        Button("Reset demo rooms") { store.reset() }
+                        Divider()
                     }
-                    Divider()
-                    Button("Reconnect") { Task { await store.restoreConnection() } }
-                    Button("Connection setup…") { store.showConnection = true }
-                } label: { Label(store.isLive ? "Bridge connected" : "Demo mode", systemImage: "circle.dotted").font(.system(size: 12)) }
-                    .menuStyle(.borderlessButton).fixedSize().foregroundColor(Theme.accent).padding(.top, 9)
+                    Button("Reconnect") { Task { await store.restoreConnection() } }.disabled(store.sending || store.connection.busy)
+                    Button("Bridge settings…") { store.showConnection = true }
+                } label: {
+                    Label(store.pausedAfterSleep ? "Paused" : store.isLive ? (store.bridgeUnavailable ? "Bridge unavailable" : "Hue Bridge") : "Demo home", systemImage: store.pausedAfterSleep ? "pause.circle" : store.bridgeUnavailable ? "wifi.exclamationmark" : "circle.dotted")
+                        .font(.system(size: 12, weight: .medium))
+                }.menuStyle(.borderlessButton).fixedSize().foregroundColor(Theme.accent)
             }
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundColor(Theme.muted)
-                TextField("Find a scene or room", text: $store.search).textFieldStyle(.plain).focused($searchFocused).accessibilityLabel("Search scenes")
-                if !store.search.isEmpty { Button { store.search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).accessibilityLabel("Clear search") }
-                Text("⌘F").foregroundColor(Theme.muted).font(.system(size: 11))
-            }.padding(10).background(Theme.surface).cornerRadius(8).frame(maxWidth: 350)
+            HStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundColor(Theme.muted)
+                    TextField("Find a scene or room", text: $store.search).textFieldStyle(.plain).focused($searchFocused).accessibilityLabel("Search scenes")
+                    if !store.search.isEmpty { Button { store.search = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).accessibilityLabel("Clear search") }
+                    Text("⌘F").foregroundColor(Theme.muted).font(.system(size: 11))
+                }.padding(11).background(Theme.surface).cornerRadius(9).overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.line)).frame(maxWidth: 350)
+                Spacer(minLength: 0)
+                if store.isLive { RefreshScenesButton() }
+                Button { store.edit() } label: { Label("Scene editor", systemImage: "slider.horizontal.3") }
+                    .disabled(store.home.resources.isEmpty || store.pausedAfterSleep).help("Create, edit, duplicate, import, or export a scene")
+            }.controlSize(.regular)
         }.padding(28)
     }
     private var emptyState: some View {
         VStack(spacing: 14) {
-            Image(systemName: store.search.isEmpty ? "star" : "magnifyingglass").font(.system(size: 32)).foregroundColor(Theme.accent)
-            Text(store.search.isEmpty ? (store.selection == "recent" ? "Your next scene starts here" : "Keep your best scenes close") : "No scenes found").font(.title2)
-            Text(store.search.isEmpty ? (store.selection == "recent" ? "Scenes you play will appear here, most recent first." : "Star any scene to keep it here and in your menu bar.") : "Try another name, or clear your search.").foregroundColor(Theme.muted)
-            Button(store.search.isEmpty ? "Browse all scenes" : "Clear search") { store.search = ""; if ["favorites", "recent"].contains(store.selection) { store.selection = "all" } }
-        }.frame(maxWidth: .infinity).padding(.vertical, 90)
+            Image(systemName: store.bridgeUnavailable ? "wifi.exclamationmark" : store.search.isEmpty ? "lightbulb.2" : "magnifyingglass").font(.system(size: 32)).foregroundColor(Theme.accent)
+            Text(emptyTitle).font(.title2)
+            Text(emptyMessage).foregroundColor(Theme.muted).multilineTextAlignment(.center).frame(maxWidth: 410)
+            if store.bridgeUnavailable { RefreshScenesButton() }
+            else if !store.search.isEmpty { Button("Clear search") { store.search = "" } }
+            else if ["favorites", "recent"].contains(store.selection) { Button("Browse all scenes") { store.selection = "all" } }
+            else if store.isLive { RefreshScenesButton() }
+        }.frame(maxWidth: .infinity).padding(.vertical, 80)
     }
+    private var emptyTitle: String {
+        if store.bridgeAuthorizationRequired { return "Reconnect to your Bridge" }
+        if store.bridgeUnavailable { return "Bridge unavailable" }
+        if !store.search.isEmpty { return "No matching scenes" }
+        if store.selection == "favorites" { return "Keep your best scenes close" }
+        if store.selection == "recent" { return "Your next scene starts here" }
+        return store.refreshing ? "Loading your scenes…" : "No saved scenes here yet"
+    }
+    private var emptyMessage: String {
+        if store.bridgeAuthorizationRequired { return "The Bridge rejected this Mac’s access. Choose Reconnect to check it, then follow Bridge settings if new pairing is needed." }
+        if store.bridgeUnavailable { return "Check the Bridge and your local network. Your saved connection is kept; there’s no need to pair again." }
+        if !store.search.isEmpty { return "Try a scene’s name, or clear your search to see everything in this view." }
+        if store.selection == "favorites" { return "Star a scene to keep it here and in your menu bar." }
+        if store.selection == "recent" { return "Scenes you play appear here, most recent first." }
+        return "Save a scene to this room or zone in the Hue app, then choose Refresh scenes. Gallery browsing alone doesn’t add a saved scene."
+    }
+
 }
 
 struct GroupHeader: View {
@@ -121,8 +154,8 @@ struct GroupHeader: View {
         HStack(spacing: 12) {
             Image(systemName: group.icon).foregroundColor(Theme.muted).font(.system(size: 19))
             VStack(alignment: .leading, spacing: 4) {
-                Text(group.name).font(.system(size: 17, weight: .semibold))
-                Text(group.isOn == false ? "Lights off" : group.activeSceneID.flatMap { id in store.home.scenes.first { $0.id == id }?.name } ?? "Custom lighting").font(.system(size: 11)).foregroundColor(Theme.muted)
+                Text(group.name).font(.system(size: 18, weight: .semibold))
+                Text("\(store.scenes(in: group.id).count) scenes · " + (group.isOn == false ? "Lights off" : group.activeSceneID.flatMap { id in store.home.scenes.first { $0.id == id }?.name } ?? "Custom lighting")).font(.system(size: 11)).foregroundColor(Theme.muted)
             }
             Spacer(minLength: 16)
             if let level = group.brightness {
@@ -144,24 +177,38 @@ struct SceneTile: View {
     @State private var hovered = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { store.activate(scene) } label: {
-                ZStack(alignment: .bottomLeading) {
-                    SceneArtwork(colors: scene.colors).frame(height: 115)
-                    if active { Label("Active", systemImage: "checkmark.circle.fill").font(.system(size: 10, weight: .semibold)).padding(.horizontal, 9).padding(.vertical, 5).background(Color.black.opacity(0.65)).cornerRadius(6).padding(10) }
-                    if hovered && !active { Image(systemName: "play.fill").font(.system(size: 17)).padding(10).background(Color.black.opacity(0.45)).clipShape(Circle()).frame(maxWidth: .infinity, maxHeight: .infinity) }
-                }.contentShape(Rectangle())
-            }.buttonStyle(.plain).disabled(store.controlsDisabled).accessibilityLabel("Activate \(scene.name) in \(store.home.groups.first { $0.id == scene.groupID }?.name ?? "room")").help("Activate \(scene.name)")
-            HStack(spacing: 6) {
+            ZStack(alignment: .topTrailing) {
                 Button { store.activate(scene) } label: {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(scene.name).font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.ink).lineLimit(1)
-                        Text(scene.detail).font(.system(size: 10)).foregroundColor(Theme.muted).lineLimit(1)
-                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    ZStack(alignment: .bottomLeading) {
+                        SceneArtwork(colors: scene.colors).frame(height: 132)
+                        if active {
+                            Label("Active", systemImage: "checkmark.circle.fill").font(.system(size: 11, weight: .semibold))
+                                .padding(.horizontal, 9).padding(.vertical, 6).background(Theme.canvas.opacity(0.9)).cornerRadius(7).padding(12)
+                        } else if hovered {
+                            Image(systemName: "play.fill").font(.system(size: 16)).frame(width: 38, height: 38).background(Theme.canvas.opacity(0.85)).clipShape(Circle()).padding(12)
+                        }
+                    }.contentShape(Rectangle())
                 }.buttonStyle(.plain).disabled(store.controlsDisabled)
-                Button { store.favorite(scene) } label: { Image(systemName: store.favorites.contains(scene.id) ? "star.fill" : "star").font(.system(size: 13)).foregroundColor(store.favorites.contains(scene.id) ? Theme.accent : Theme.muted).frame(width: 28, height: 32) }.buttonStyle(.plain).accessibilityLabel("\(store.favorites.contains(scene.id) ? "Unfavorite" : "Favorite") \(scene.name)")
-            }.padding(12)
-        }.background(Theme.surface).cornerRadius(14)
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(active ? Theme.accent : Color.clear, lineWidth: 1.5))
+                    .accessibilityLabel("Activate \(scene.name) in \(store.home.groups.first { $0.id == scene.groupID }?.name ?? "room")").help("Activate \(scene.name)")
+                Button { store.favorite(scene) } label: {
+                    Image(systemName: store.favorites.contains(scene.id) ? "star.fill" : "star")
+                        .font(.system(size: 12, weight: .semibold)).foregroundColor(store.favorites.contains(scene.id) ? Theme.accent : Theme.ink)
+                        .frame(width: 30, height: 30).background(Theme.canvas.opacity(0.85)).clipShape(Circle())
+                }.buttonStyle(.plain).padding(10).accessibilityLabel("\(store.favorites.contains(scene.id) ? "Unfavorite" : "Favorite") \(scene.name)")
+            }
+            Button { store.activate(scene) } label: {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text(scene.name).font(.system(size: 14, weight: .semibold)).foregroundColor(Theme.ink).lineLimit(2).frame(height: 34, alignment: .topLeading)
+                    HStack(spacing: 5) {
+                        if !scene.colors.isEmpty {
+                            HStack(spacing: 3) { ForEach(Array(scene.colors.prefix(5).enumerated()), id: \.offset) { _, hex in Circle().fill(Color(hex: hex)).frame(width: 8, height: 8) } }.accessibilityHidden(true)
+                        }
+                        Text(scene.detail).font(.system(size: 10)).foregroundColor(Theme.muted).lineLimit(1)
+                    }
+                }.padding(14).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain).disabled(store.controlsDisabled).help(scene.name)
+        }.background(hovered ? Theme.elevated : Theme.surface).cornerRadius(14)
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(active ? Theme.accent : hovered ? Theme.muted.opacity(0.65) : Theme.line, lineWidth: active ? 1.5 : 1))
             .onHover { hovered = $0 }
             .contextMenu {
                 Button("Play scene") { store.activate(scene) }.disabled(store.controlsDisabled)

@@ -64,6 +64,10 @@ import HueCore
         let projected = HomeSnapshot.project(try HueClient.decode(Data(json.utf8), status: 200).data)
         check(projected.groups[0].brightness == 52 && projected.groups[0].activeSceneID == "s", "Projection resolves resource references")
         check(projected.scenes[0].groupID == "r", "Scene remains associated with its room")
+        let previewResources = try HueClient.decode(Data(#"{"errors":[],"data":[{"id":"color-scene","type":"scene","group":{"rid":"r","rtype":"room"},"actions":[{"target":{"rid":"a","rtype":"light"},"action":{"on":{"on":true},"color":{"xy":{"x":0.64,"y":0.33}}}},{"target":{"rid":"b","rtype":"light"},"action":{"on":{"on":true},"color":{"xy":{"x":0.3,"y":0.6}}}}]},{"id":"no-preview","type":"scene","group":{"rid":"r","rtype":"room"}}]}"#.utf8), status: 200).data
+        let previewHome = HomeSnapshot.project(previewResources)
+        check(previewHome.scenes[0].colors.count == 2 && previewHome.scenes[0].colors[0] != previewHome.scenes[0].colors[1], "Scene artwork derives distinct colors from saved light actions")
+        check(previewHome.scenes[1].colors.isEmpty, "Missing color data has no invented scene palette")
         var parser = SSEParser()
         check(parser.feed(": ping") == nil && parser.feed("") == nil, "SSE heartbeat causes no state change")
         check(parser.feed("data: [{\"type\":\"update\"}]") == nil, "SSE waits for complete frame")

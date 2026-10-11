@@ -41,7 +41,20 @@ public struct HomeSnapshot {
     public static func project(_ resources: [HueResource]) -> HomeSnapshot {
         let scenes = resources.filter { $0.type == "scene" }.compactMap { r -> LightScene? in
             guard let group = r.group else { return nil }
-            return LightScene(id: r.id, name: r.metadata?.name ?? "Untitled scene", groupID: group.rid, colors: ["506A85", "B9A4A0", "D8BE9C"], brightness: nil, detail: "Bridge scene")
+            var colors: [String] = []
+            for action in r.actions ?? [] where action.action.on?.on != false {
+                let state = action.action
+                let swatch: String?
+                if let xy = state.color?.xy, xy.x.isFinite, xy.y.isFinite, xy.x >= 0, xy.y > 0, xy.x+xy.y <= 1 {
+                    let rgb = SceneColor.rgb(xy)
+                    swatch = String(format: "%02X%02X%02X", Int((rgb.red*255).rounded()), Int((rgb.green*255).rounded()), Int((rgb.blue*255).rounded()))
+                } else if let mirek = state.color_temperature?.mirek, (153...500).contains(mirek) {
+                    // Representative warmth swatches, not a calibrated bulb simulation.
+                    swatch = mirek < 220 ? "DCEAFF" : mirek < 330 ? "FFF0D7" : "FFC080"
+                } else { swatch = nil }
+                if let swatch, !colors.contains(swatch), colors.count < 5 { colors.append(swatch) }
+            }
+            return LightScene(id: r.id, name: r.metadata?.name ?? "Untitled scene", groupID: group.rid, colors: colors, brightness: nil, detail: colors.isEmpty ? "Color preview unavailable" : "Saved light colors")
         }
         let groups = resources.filter { ["room", "zone"].contains($0.type) }.map { r -> SceneGroup in
             let serviceID = r.services?.first { $0.rtype == "grouped_light" }?.rid

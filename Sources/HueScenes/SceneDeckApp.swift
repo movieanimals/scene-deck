@@ -11,6 +11,7 @@ import AppKit
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandMenu("Scenes") {
+                Button("Refresh scenes") { store.refreshScenes() }.keyboardShortcut("r", modifiers: .command).disabled(!store.canRefresh)
                 Button("Scene files & editor…") { store.edit() }.disabled(store.pausedAfterSleep)
                 Divider()
                 ForEach(Array(store.favoriteScenes.prefix(9).enumerated()), id: \.element.id) { index, scene in
@@ -57,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let path = args[index + 1]
             let capture = {
                 guard let window = NSApp.windows.first(where: { $0.title == "Scene Deck" }), let view = window.contentView else { NSApp.terminate(nil); return }
-                window.setContentSize(NSSize(width: 1120, height: 820))
+                window.setContentSize(args.contains("--compact-snapshot") ? NSSize(width: 900, height: 640) : NSSize(width: 1120, height: 820))
                 view.layoutSubtreeIfNeeded()
                 guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { NSApp.terminate(nil); return }
                 view.cacheDisplay(in: view.bounds, to: bitmap)

@@ -55,7 +55,7 @@ import HueCore
             fetchCount += 1
             if fetchCount == 2 { await withCheckedContinuation { releaseFetch = $0 } }
             return []
-        }, events: { callback = $0; try await Task.sleep(nanoseconds: 60_000_000_000) }, close: { closed = true })
+        }, events: { callback = $0; try await Task.sleep(nanoseconds: 60_000_000_000) }, close: { closed = true }, minimumFetchInterval: 0)
         weak var weakSync = sync
         sync?.start()
         for _ in 0..<100 where callback == nil { try await Task.sleep(nanoseconds: 10_000_000) }
@@ -108,7 +108,7 @@ import HueCore
         check(store.notice.contains("did not confirm") && !store.sending, "Failed commands release controls and report failure")
         check(store.recentIDs == recentBeforeFailure, "Failed recall does not appear in recent scenes")
         var pendingReads: [CheckedContinuation<[HueResource], Error>] = []
-        let coordinated = BridgeSynchronizer(fetch: { try await withCheckedThrowingContinuation { pendingReads.append($0) } }, events: { _ in try await Task.sleep(nanoseconds: 60_000_000_000) }, close: {})
+        let coordinated = BridgeSynchronizer(fetch: { try await withCheckedThrowingContinuation { pendingReads.append($0) } }, events: { _ in try await Task.sleep(nanoseconds: 60_000_000_000) }, close: {}, minimumFetchInterval: 0)
         coordinated.start()
         for _ in 0..<100 where pendingReads.count < 1 { try await Task.sleep(nanoseconds: 1_000_000) }
         coordinated.start() // production command completion restarts this one authority
@@ -127,7 +127,7 @@ import HueCore
             revokedFetches += 1
             if revokedFetches > 1 { throw HueError.http(403) }
             return []
-        }, events: { revokedCallback = $0; try await Task.sleep(nanoseconds: 60_000_000_000) }, close: { revokedClosed = true })
+        }, events: { revokedCallback = $0; try await Task.sleep(nanoseconds: 60_000_000_000) }, close: { revokedClosed = true }, minimumFetchInterval: 0)
         revoked.start()
         for _ in 0..<100 where revokedCallback == nil { try await Task.sleep(nanoseconds: 1_000_000) }
         await revokedCallback?()
